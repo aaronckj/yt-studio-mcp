@@ -15,6 +15,7 @@ from .tools import (
     meta,
     playlists,
     questions,
+    thumbnails,
     videos,
 )
 
@@ -31,7 +32,7 @@ def build_app() -> FastMCP:
     )
     for module in (
         videos, playlists, comments, live, captions, analytics, giveaway,
-        banned_words, bulk, questions, meta,
+        banned_words, bulk, questions, thumbnails, meta,
     ):
         module.register(mcp)
     return mcp

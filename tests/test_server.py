@@ -29,6 +29,8 @@ EXPECTED = {
     "post_giveaway_question", "giveaway_question_status",
     # bulk
     "batch_update_descriptions", "made_for_kids_audit", "post_stream_digest",
+    # thumbnails
+    "generate_thumbnail",
     # meta
     "quota_status", "health_check",
 }
