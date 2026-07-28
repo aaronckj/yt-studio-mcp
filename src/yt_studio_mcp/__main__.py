@@ -7,6 +7,11 @@ import sys
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "scan":
+        from .scan_cli import main as scan_main
+
+        raise SystemExit(scan_main(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(prog="yt-studio-mcp")
     sub = parser.add_subparsers(dest="command")
     auth_p = sub.add_parser("auth", help="one-time interactive OAuth consent")
@@ -16,6 +21,7 @@ def main() -> None:
         help="path to the OAuth client_secret.json downloaded from Google Cloud",
     )
     sub.add_parser("serve", help="run the MCP server (default)")
+    sub.add_parser("scan", help="headless spam scan for cron (see scan --help)")
     args = parser.parse_args()
 
     if args.command == "auth":
