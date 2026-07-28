@@ -22,6 +22,8 @@ EXPECTED = {
     # giveaway
     "collect_entries", "draw_winners", "make_verification_code",
     "check_verification_reply", "post_winner_reply",
+    # banned words
+    "banned_words_list", "banned_words_add", "banned_words_remove", "scan_comments",
     # meta
     "quota_status", "health_check",
 }

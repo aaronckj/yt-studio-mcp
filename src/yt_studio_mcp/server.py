@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from .tools import analytics, captions, comments, giveaway, live, meta, playlists, videos
+from .tools import (
+    analytics,
+    banned_words,
+    captions,
+    comments,
+    giveaway,
+    live,
+    meta,
+    playlists,
+    videos,
+)
 
 
 def build_app() -> FastMCP:
@@ -17,6 +27,9 @@ def build_app() -> FastMCP:
             "dry_run=True to preview without writing."
         ),
     )
-    for module in (videos, playlists, comments, live, captions, analytics, giveaway, meta):
+    for module in (
+        videos, playlists, comments, live, captions, analytics, giveaway,
+        banned_words, meta,
+    ):
         module.register(mcp)
     return mcp
