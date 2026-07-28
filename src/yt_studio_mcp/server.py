@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from .tools import (
     analytics,
     banned_words,
+    bulk,
     captions,
     comments,
     giveaway,
@@ -29,7 +30,7 @@ def build_app() -> FastMCP:
     )
     for module in (
         videos, playlists, comments, live, captions, analytics, giveaway,
-        banned_words, meta,
+        banned_words, bulk, meta,
     ):
         module.register(mcp)
     return mcp

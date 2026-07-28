@@ -17,6 +17,7 @@ from pathlib import Path
 from ..client import get_yt, preview
 
 WORDLIST_PATH = Path.home() / ".config" / "yt-studio-mcp" / "banned_words.json"
+SCAN_STATE_PATH = Path.home() / ".config" / "yt-studio-mcp" / "scan_state.json"
 _SEP = re.compile(r"[\s\.\-_,!\$\*\|]+")
 
 
@@ -98,13 +99,19 @@ def register(mcp) -> None:
         limit: int = 500,
         extra_words: list[str] | None = None,
         auto_action: str = "none",
+        incremental: bool = False,
         dry_run: bool = False,
     ) -> dict:
         """Sweep comments (one video, or channel-wide when video_id omitted) for
         banned words. auto_action: none | heldForReview | rejected — matches get
-        that moderation status applied (dry_run previews instead)."""
+        that moderation status applied (dry_run previews instead).
+        incremental=True only examines comments newer than the previous
+        incremental scan (watermark stored locally) — cheap to run daily."""
         if auto_action not in ("none", "heldForReview", "rejected"):
             return {"error": "auto_action must be none|heldForReview|rejected"}
+        watermark = None
+        if incremental and SCAN_STATE_PATH.exists():
+            watermark = json.loads(SCAN_STATE_PATH.read_text()).get("last_scan")
         words = _load_words() + (extra_words or [])
         if not words:
             return {"error": "banned word list is empty; add words with banned_words_add"}
@@ -118,8 +125,14 @@ def register(mcp) -> None:
         threads = yt.paginate(yt.data.commentThreads(), "list", limit=limit, **params)
 
         matches = []
+        newest_seen = watermark
         for t in threads:
             top = t["snippet"]["topLevelComment"]["snippet"]
+            published = top.get("publishedAt", "")
+            if newest_seen is None or published > newest_seen:
+                newest_seen = published
+            if watermark and published <= watermark:
+                continue
             text = top.get("textOriginal", top.get("textDisplay", ""))
             hits = match_comment(text, words)
             if hits:
@@ -139,6 +152,12 @@ def register(mcp) -> None:
             "matches": matches,
             "words_checked": len(words),
         }
+        if incremental:
+            result["watermark_was"] = watermark
+            if newest_seen and not dry_run:
+                SCAN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                SCAN_STATE_PATH.write_text(json.dumps({"last_scan": newest_seen}))
+                result["watermark_now"] = newest_seen
         if auto_action != "none" and matches:
             if dry_run:
                 result["moderation"] = preview(

@@ -236,6 +236,53 @@ def register(mcp) -> None:
         }
 
     @mcp.tool()
+    def export_entries_csv(snapshot_path: str, csv_path: str | None = None) -> dict:
+        """Export a snapshot's entries to CSV (channel_id, author, video_id,
+        comment_id, published) for spreadsheets or records."""
+        import csv
+
+        path = Path(snapshot_path)
+        snap = json.loads(path.read_text())
+        out_path = Path(csv_path) if csv_path else path.with_suffix(".csv")
+        fields = ["channel_id", "author", "video_id", "comment_id", "published"]
+        with out_path.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(
+                {k: e.get(k, "") for k in fields} for e in snap["entries"]
+            )
+        return {
+            "csv_path": str(out_path),
+            "entries": len(snap["entries"]),
+            "entry_hash": snap["entry_hash"],
+        }
+
+    @mcp.tool()
+    def winner_announcement(audit_path: str, claim_days: int = 7, contact: str = "") -> dict:
+        """Draft winner-announcement text (for a pinned comment / community post)
+        from a draw's audit record. Review before posting."""
+        audit = json.loads(Path(audit_path).read_text())
+        names = [w.get("author") or w["channel_id"] for w in audit["winners"]]
+        lines = [
+            "🎉 GIVEAWAY WINNERS 🎉",
+            "",
+            "Congratulations to:",
+            *[f"  • {n}" for n in names],
+            "",
+            f"Winners: check for a reply on your comment, then follow the claim "
+            f"instructions within {claim_days} days.",
+        ]
+        if contact:
+            lines.append(f"Claims: {contact}")
+        lines += [
+            "",
+            f"Drawn from {audit['n']}-winner random draw, seed \"{audit['seed']}\", "
+            f"entry hash {audit['entry_hash'][:12]}… (independently verifiable).",
+            "We will NEVER ask for payment or card details.",
+        ]
+        return {"text": "\n".join(lines), "winners": names}
+
+    @mcp.tool()
     def post_winner_reply(comment_id: str, text: str, dry_run: bool = False) -> dict:
         """Reply to a winning comment as the channel (winner announcement/notification)."""
         if dry_run:

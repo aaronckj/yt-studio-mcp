@@ -21,9 +21,12 @@ EXPECTED = {
     "channel_report", "video_report", "top_videos",
     # giveaway
     "collect_entries", "draw_winners", "make_verification_code",
-    "check_verification_reply", "post_winner_reply",
+    "check_verification_reply", "post_winner_reply", "export_entries_csv",
+    "winner_announcement",
     # banned words
     "banned_words_list", "banned_words_add", "banned_words_remove", "scan_comments",
+    # bulk
+    "batch_update_descriptions", "made_for_kids_audit", "post_stream_digest",
     # meta
     "quota_status", "health_check",
 }
