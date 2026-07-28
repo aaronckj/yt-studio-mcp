@@ -21,6 +21,39 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger("yt_studio_mcp")
 
 
+def _config_dir():
+    from pathlib import Path
+    return Path.home() / ".config" / "yt-studio-mcp"
+
+
+def _write_live_status(is_live: bool, title: str, held: int) -> None:
+    from datetime import UTC, datetime
+    p = _config_dir() / "live_status.json"
+    try:
+        _config_dir().mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({
+            "is_live": is_live, "title": title, "held": held,
+            "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+        }))
+    except OSError as exc:
+        logger.error("live_status write: %s", exc)
+
+
+def _log_held(item: dict) -> None:
+    """Append a held item to scan_history.jsonl so it shows on the dashboard."""
+    from datetime import UTC, datetime
+    p = _config_dir() / "scan_history.jsonl"
+    rec = {"ts": datetime.now(UTC).isoformat(timespec="seconds"),
+           "checked_new": 1, "matches": [item], "action": "live",
+           "quota_spent": 0}
+    try:
+        _config_dir().mkdir(parents=True, exist_ok=True)
+        with p.open("a") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except OSError as exc:
+        logger.error("history append: %s", exc)
+
+
 def notify(msg: str) -> None:
     url = os.environ.get("YT_MCP_NTFY_URL")
     if not url:
@@ -60,6 +93,7 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
         print(json.dumps({"status": "no active broadcast; nothing to watch"}))
         return 0
     logger.info("watching broadcast %s (%s)", b["id"], b["title"])
+    _write_live_status(True, b["title"], 0)
     notify(f"🟢 Live moderation started for: {b['title']}")
 
     seen_comments: set[str] = set()
@@ -97,6 +131,10 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
                     yt.call(yt.data.comments().setModerationStatus(
                         id=cid, moderationStatus=auto_action), op="setModerationStatus")
                     held += 1
+                    _log_held({"comment_id": cid, "video_id": b["id"],
+                               "author": top.get("authorDisplayName"),
+                               "text": top.get("textOriginal", top.get("textDisplay", ""))[:200],
+                               "source": f"live-comment/{src}", "matched": []})
                     notify(f"held comment ({src}): {top.get('authorDisplayName')}")
         except Exception as exc:  # noqa: BLE001 - comments may be disabled on live
             logger.error("comment poll: %s", exc)
@@ -114,15 +152,21 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
                     if ad.get("isChatOwner") or ad.get("isChatModerator"):
                         continue
                     text = m["snippet"].get("displayMessage", "")
-                    if is_spam(ad["displayName"], text):
+                    csrc = is_spam(ad["displayName"], text)
+                    if csrc:
                         yt.call(yt.data.liveChatMessages().delete(id=m["id"]), op="delete")
                         held += 1
+                        _log_held({"comment_id": m["id"], "video_id": b["id"],
+                                   "author": ad["displayName"], "text": text[:200],
+                                   "source": f"live-chat/{csrc}", "matched": []})
                         notify(f"deleted chat: {ad['displayName']}")
             except Exception as exc:  # noqa: BLE001
                 logger.error("chat poll: %s", exc)
+        _write_live_status(True, b["title"], held)
         logger.info("cycle done, held so far=%d, quota=%d", held, yt.quota.spent)
         time.sleep(max(15, interval))
 
+    _write_live_status(False, b["title"] if b else "", held)
     notify(f"🔴 Live moderation ended. Held {held} items this stream.")
     print(json.dumps({"status": "broadcast ended", "held": held,
                       "quota_spent": yt.quota.spent}))
