@@ -117,11 +117,12 @@ def register(mcp) -> None:
             return {"error": "banned word list is empty; add words with banned_words_add"}
         yt = get_yt()
         params: dict = {"part": "snippet", "order": "time", "textFormat": "plainText"}
+        me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
+        own_channel_id = me["items"][0]["id"]
         if video_id:
             params["videoId"] = video_id
         else:
-            me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
-            params["allThreadsRelatedToChannelId"] = me["items"][0]["id"]
+            params["allThreadsRelatedToChannelId"] = own_channel_id
         threads = yt.paginate(yt.data.commentThreads(), "list", limit=limit, **params)
 
         matches = []
@@ -133,6 +134,8 @@ def register(mcp) -> None:
                 newest_seen = published
             if watermark and published <= watermark:
                 continue
+            if top.get("authorChannelId", {}).get("value") == own_channel_id:
+                continue  # channel's own comments are exempt
             text = top.get("textOriginal", top.get("textDisplay", ""))
             hits = match_comment(text, words)
             if hits:

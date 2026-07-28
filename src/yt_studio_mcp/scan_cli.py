@@ -51,7 +51,7 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
         watermark = json.loads(SCAN_STATE_PATH.read_text()).get("last_scan")
 
     me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
-    channel_id = me["items"][0]["id"]
+    channel_id = me["items"][0]["id"]  # own comments are exempt below
     threads = yt.paginate(
         yt.data.commentThreads(),
         "list",
@@ -72,6 +72,9 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
             newest = published
         if watermark and published <= watermark:
             continue
+        author_id = top.get("authorChannelId", {}).get("value", "")
+        if author_id == channel_id:
+            continue  # never scan/hold the channel's own comments
         checked += 1
         text = top.get("textOriginal", top.get("textDisplay", ""))
         author = top.get("authorDisplayName", "")
