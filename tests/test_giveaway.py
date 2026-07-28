@@ -80,3 +80,16 @@ def test_canonical_hash_tamper_detection():
          "published": "2026-08-02T00:00:00Z"}
     ]
     assert canonical_hash(list(reversed(e2))) == canonical_hash(e2)
+
+
+def test_resolve_giveaway_path_confined():
+    import pytest
+
+    from yt_studio_mcp.tools import giveaway
+
+    with pytest.raises(ValueError):
+        giveaway.resolve_giveaway_path("/etc/passwd")
+    with pytest.raises(ValueError):
+        giveaway.resolve_giveaway_path(str(giveaway.SNAPSHOT_DIR / ".." / "x.json"))
+    ok = giveaway.SNAPSHOT_DIR / "entries-x.json"
+    assert giveaway.resolve_giveaway_path(str(ok)) == ok.resolve()

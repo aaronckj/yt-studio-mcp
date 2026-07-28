@@ -22,6 +22,19 @@ SNAPSHOT_DIR = Path.home() / ".config" / "yt-studio-mcp" / "giveaways"
 ALGO_VERSION = "v1"
 
 
+def resolve_giveaway_path(path: str) -> Path:
+    """Resolve a snapshot/audit/CSV path, refusing anything outside SNAPSHOT_DIR.
+
+    Guards against path traversal / arbitrary file access if a hostile prompt
+    (e.g. injected via comment text) steers tool arguments.
+    """
+    rp = Path(path).expanduser().resolve()
+    base = SNAPSHOT_DIR.resolve()
+    if not rp.is_relative_to(base):
+        raise ValueError(f"path must be inside {base}")
+    return rp
+
+
 def _parse_ts(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
@@ -172,7 +185,10 @@ def register(mcp) -> None:
         record next to the snapshot."""
         if not seed:
             return {"error": "provide a seed (announce it publicly for verifiability)"}
-        path = Path(snapshot_path)
+        try:
+            path = resolve_giveaway_path(snapshot_path)
+        except ValueError as exc:
+            return {"error": str(exc)}
         snap = json.loads(path.read_text())
         entries = snap["entries"]
         digest = canonical_hash(entries)
@@ -200,7 +216,10 @@ def register(mcp) -> None:
     @mcp.tool()
     def make_verification_code(audit_path: str, winner_channel_id: str) -> dict:
         """Generate a short verification code for a winner and record it in the audit file."""
-        path = Path(audit_path)
+        try:
+            path = resolve_giveaway_path(audit_path)
+        except ValueError as exc:
+            return {"error": str(exc)}
         audit = json.loads(path.read_text())
         if winner_channel_id not in {w["channel_id"] for w in audit["winners"]}:
             return {"error": f"{winner_channel_id} is not a winner in this audit record"}
@@ -213,7 +232,10 @@ def register(mcp) -> None:
     def check_verification_reply(audit_path: str, comment_id: str, winner_channel_id: str) -> dict:
         """Verify a winner's reply: fetches the comment and checks it was authored
         by the winning channel and contains their verification code."""
-        audit = json.loads(Path(audit_path).read_text())
+        try:
+            audit = json.loads(resolve_giveaway_path(audit_path).read_text())
+        except ValueError as exc:
+            return {"error": str(exc)}
         code = audit["verification_codes"].get(winner_channel_id)
         if not code:
             return {"error": "no verification code issued for that channel"}
@@ -241,9 +263,14 @@ def register(mcp) -> None:
         comment_id, published) for spreadsheets or records."""
         import csv
 
-        path = Path(snapshot_path)
+        try:
+            path = resolve_giveaway_path(snapshot_path)
+            out_path = (
+                resolve_giveaway_path(csv_path) if csv_path else path.with_suffix(".csv")
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
         snap = json.loads(path.read_text())
-        out_path = Path(csv_path) if csv_path else path.with_suffix(".csv")
         fields = ["channel_id", "author", "video_id", "comment_id", "published"]
         with out_path.open("w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fields)
@@ -261,7 +288,10 @@ def register(mcp) -> None:
     def winner_announcement(audit_path: str, claim_days: int = 7, contact: str = "") -> dict:
         """Draft winner-announcement text (for a pinned comment / community post)
         from a draw's audit record. Review before posting."""
-        audit = json.loads(Path(audit_path).read_text())
+        try:
+            audit = json.loads(resolve_giveaway_path(audit_path).read_text())
+        except ValueError as exc:
+            return {"error": str(exc)}
         names = [w.get("author") or w["channel_id"] for w in audit["winners"]]
         lines = [
             "🎉 GIVEAWAY WINNERS 🎉",
