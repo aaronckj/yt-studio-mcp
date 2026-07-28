@@ -25,6 +25,8 @@ EXPECTED = {
     "winner_announcement",
     # banned words
     "banned_words_list", "banned_words_add", "banned_words_remove", "scan_comments",
+    # questions
+    "post_giveaway_question", "giveaway_question_status",
     # bulk
     "batch_update_descriptions", "made_for_kids_audit", "post_stream_digest",
     # meta
