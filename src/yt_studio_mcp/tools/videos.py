@@ -46,6 +46,29 @@ def register(mcp) -> None:
         }
 
     @mcp.tool()
+    def list_subscribers(limit: int = 50) -> dict:
+        """List PUBLIC subscribers (YouTube only reveals subscribers who set
+        their subscriptions public — most don't; totals live in channel_info)."""
+        yt = get_yt()
+        items = yt.paginate(
+            yt.data.subscriptions(),
+            "list",
+            limit=limit,
+            part="subscriberSnippet",
+            mySubscribers=True,
+        )
+        return {
+            "public_subscribers": [
+                {
+                    "title": s["subscriberSnippet"].get("title"),
+                    "channel_id": s["subscriberSnippet"].get("channelId"),
+                }
+                for s in items
+            ],
+            "note": "private-mode subscribers are not listable by design",
+        }
+
+    @mcp.tool()
     def list_videos(limit: int = 25) -> list[dict]:
         """List the channel's uploaded videos, newest first, with basic stats."""
         yt = get_yt()

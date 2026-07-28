@@ -4,7 +4,7 @@ from yt_studio_mcp.server import build_app
 
 EXPECTED = {
     # videos
-    "channel_info", "list_videos", "get_video", "update_video", "set_thumbnail",
+    "channel_info", "list_subscribers", "list_videos", "get_video", "update_video", "set_thumbnail",
     "upload_video", "delete_video",
     # playlists
     "list_playlists", "create_playlist", "delete_playlist", "add_to_playlist",
