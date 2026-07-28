@@ -109,9 +109,25 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
         "action": auto_action,
         "quota_spent": yt.quota.spent,
     }
+    _append_history(report)
     print(json.dumps(report, indent=2))
     notify(matches)
     return 2 if matches else 0
+
+
+def _append_history(report: dict) -> None:
+    """Append a timestamped run record to scan_history.jsonl (dashboard feed)."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    path = Path.home() / ".config" / "yt-studio-mcp" / "scan_history.jsonl"
+    record = {"ts": datetime.now(UTC).isoformat(timespec="seconds"), **report}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError as exc:  # history is best-effort; the scan itself succeeded
+        logger.error("history append failed: %s", exc)
 
 
 def main(argv: list[str]) -> int:
