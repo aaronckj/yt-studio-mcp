@@ -97,7 +97,7 @@ def _resize_ref(path: str, max_px: int = 1024) -> bytes:
 
 def generate_image_with_refs(prompt: str, quality: str, references: list[str]) -> bytes:
     """Generate via the images/edits endpoint using reference images to keep
-    characters on-model (e.g. the Cipher/Echo character sheets)."""
+    characters on-model (e.g. a recurring mascot character sheet)."""
     import secrets as _sec
 
     api_url = os.environ.get("YT_MCP_IMAGE_API_URL", "https://api.openai.com/v1").rstrip("/")
@@ -157,7 +157,7 @@ def register(mcp) -> None:
         """Generate a 1280x720 thumbnail from a prompt via the configured
         image API (YT_MCP_IMAGE_API_KEY required; quality: low|medium|high).
         reference_images: local image paths fed to the model to keep characters
-        on-model (e.g. the Cipher/Echo character sheets) — uses the edits
+        on-model (e.g. a recurring mascot character sheet) — uses the edits
         endpoint. If video_id is given, the thumbnail is also uploaded."""
         if not os.environ.get("YT_MCP_IMAGE_API_KEY"):
             return {"error": "set YT_MCP_IMAGE_API_KEY to enable thumbnail generation"}
