@@ -82,17 +82,83 @@ def generate_image(prompt: str, quality: str) -> bytes:
         return img_resp.read()
 
 
+def _resize_ref(path: str, max_px: int = 1024) -> bytes:
+    """Downscale a reference image to keep the multipart request light."""
+    import io
+
+    from PIL import Image
+
+    img = Image.open(path).convert("RGB")
+    img.thumbnail((max_px, max_px), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def generate_image_with_refs(prompt: str, quality: str, references: list[str]) -> bytes:
+    """Generate via the images/edits endpoint using reference images to keep
+    characters on-model (e.g. the Cipher/Echo character sheets)."""
+    import secrets as _sec
+
+    api_url = os.environ.get("YT_MCP_IMAGE_API_URL", "https://api.openai.com/v1").rstrip("/")
+    model = os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-1")
+    key = os.environ["YT_MCP_IMAGE_API_KEY"]
+    boundary = "----ytmcp" + _sec.token_hex(8)
+    parts = []
+    for field, val in (("model", model), ("prompt", prompt), ("size", "1536x1024"),
+                       ("quality", quality), ("n", "1")):
+        parts.append(
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{field}"\r\n\r\n{val}\r\n'
+        )
+    head = "".join(parts).encode()
+    body = bytearray(head)
+    for i, ref in enumerate(references):
+        img_bytes = _resize_ref(ref)
+        body += (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="image[]"; filename="ref{i}.png"\r\n'
+            "Content-Type: image/png\r\n\r\n"
+        ).encode()
+        body += img_bytes + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    logger.info(
+        "image edit model=%s q=%s refs=%d prompt=%r",
+        model, quality, len(references), prompt[:150],
+    )
+    req = Request(f"{api_url}/images/edits", data=bytes(body),
+                  headers={"content-type": f"multipart/form-data; boundary={boundary}",
+                           "authorization": f"Bearer {key}"})
+    try:
+        with urlopen(req, timeout=300) as resp:
+            payload = json.loads(resp.read())
+    except HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:400]
+        logger.error("image edit failed %s: %s", exc.code, detail)
+        raise RuntimeError(f"image edit API {exc.code}: {detail}") from exc
+    except (URLError, TimeoutError) as exc:
+        raise RuntimeError(f"image edit API unreachable: {exc}") from exc
+    d = payload["data"][0]
+    if "b64_json" in d:
+        return base64.b64decode(d["b64_json"])
+    with urlopen(d["url"], timeout=60) as r:
+        return r.read()
+
+
 def register(mcp) -> None:
     @mcp.tool()
     def generate_thumbnail(
         prompt: str,
         video_id: str | None = None,
         quality: str = "medium",
+        reference_images: list[str] | None = None,
         dry_run: bool = False,
     ) -> dict:
         """Generate a 1280x720 thumbnail from a prompt via the configured
         image API (YT_MCP_IMAGE_API_KEY required; quality: low|medium|high).
-        If video_id is given, the thumbnail is also uploaded to that video."""
+        reference_images: local image paths fed to the model to keep characters
+        on-model (e.g. the Cipher/Echo character sheets) — uses the edits
+        endpoint. If video_id is given, the thumbnail is also uploaded."""
         if not os.environ.get("YT_MCP_IMAGE_API_KEY"):
             return {"error": "set YT_MCP_IMAGE_API_KEY to enable thumbnail generation"}
         if quality not in ("low", "medium", "high"):
@@ -100,9 +166,13 @@ def register(mcp) -> None:
         if dry_run:
             return preview(
                 "generate_thumbnail",
-                {"prompt": prompt, "quality": quality, "video_id": video_id},
+                {"prompt": prompt, "quality": quality, "video_id": video_id,
+                 "references": reference_images or []},
             )
-        png = generate_image(prompt, quality)
+        if reference_images:
+            png = generate_image_with_refs(prompt, quality, reference_images)
+        else:
+            png = generate_image(prompt, quality)
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         out_path = OUT_DIR / f"thumb-{stamp}.jpg"
