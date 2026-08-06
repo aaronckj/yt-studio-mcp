@@ -3,7 +3,7 @@
 Env:
   YT_MCP_IMAGE_API_KEY   bearer key (required to enable the tool)
   YT_MCP_IMAGE_API_URL   base URL, default https://api.openai.com/v1
-  YT_MCP_IMAGE_MODEL     default gpt-image-1
+  YT_MCP_IMAGE_MODEL     default gpt-image-2
 
 Output is center-cropped and resized to YouTube's 1280x720. Every request
 and failure is logged.
@@ -50,7 +50,7 @@ def finish_to_720(png_bytes: bytes, out_path: Path) -> None:
 
 def generate_image(prompt: str, quality: str) -> bytes:
     api_url = os.environ.get("YT_MCP_IMAGE_API_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-1")
+    model = os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-2")
     key = os.environ["YT_MCP_IMAGE_API_KEY"]
     body = {
         "model": model,
@@ -101,7 +101,7 @@ def generate_image_with_refs(prompt: str, quality: str, references: list[str]) -
     import secrets as _sec
 
     api_url = os.environ.get("YT_MCP_IMAGE_API_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-1")
+    model = os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-2")
     key = os.environ["YT_MCP_IMAGE_API_KEY"]
     boundary = "----ytmcp" + _sec.token_hex(8)
     parts = []

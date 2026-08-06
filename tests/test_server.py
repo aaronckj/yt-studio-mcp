@@ -41,3 +41,36 @@ def test_all_tools_registered():
     tools = asyncio.run(app.list_tools())
     names = {t.name for t in tools}
     assert names == EXPECTED
+
+
+def test_update_video_accepts_publish_at():
+    """Scheduling used to be write-once: publish_at existed only on upload, so
+    moving a scheduled video meant delete + re-upload or a manual Studio edit."""
+    import inspect
+
+    from yt_studio_mcp.tools import videos
+
+    src = inspect.getsource(videos)
+    assert "publish_at: str | None = None" in src
+    assert 'status["publishAt"] = publish_at' in src
+
+
+def test_scheduled_time_is_readable():
+    """publishedAt is the UPLOAD time; without publishAt a schedule cannot be
+    verified after the fact."""
+    import inspect
+
+    from yt_studio_mcp.tools import videos
+
+    src = inspect.getsource(videos)
+    assert 'out["scheduled"] = scheduled' in src
+
+
+def test_publish_at_forces_private():
+    """YouTube drops publishAt unless privacyStatus is private."""
+    import inspect
+
+    from yt_studio_mcp.tools import videos
+
+    src = inspect.getsource(videos)
+    assert 'status["privacyStatus"] = "private"' in src

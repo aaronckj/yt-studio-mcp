@@ -11,7 +11,7 @@ def _video_summary(item: dict) -> dict:
     vid = item.get("id")
     if not isinstance(vid, str):
         vid = sn.get("resourceId", {}).get("videoId")
-    return {
+    out = {
         "id": vid,
         "title": sn.get("title"),
         "published": sn.get("publishedAt"),
@@ -20,6 +20,12 @@ def _video_summary(item: dict) -> dict:
         "likes": st.get("likeCount"),
         "comments": st.get("commentCount"),
     }
+    # Only present on scheduled videos. Without it a schedule cannot be checked
+    # after the fact -- publishedAt shows the UPLOAD time, not the release time.
+    scheduled = item.get("status", {}).get("publishAt")
+    if scheduled:
+        out["scheduled"] = scheduled
+    return out
 
 
 def register(mcp) -> None:
@@ -118,9 +124,16 @@ def register(mcp) -> None:
         tags: list[str] | None = None,
         category_id: str | None = None,
         privacy: str | None = None,
+        publish_at: str | None = None,
         dry_run: bool = False,
     ) -> dict:
-        """Update video metadata. Only supplied fields change; others are preserved."""
+        """Update video metadata. Only supplied fields change; others are preserved.
+
+        publish_at (RFC3339, e.g. 2026-08-07T17:00:00Z) reschedules a video.
+        YouTube only honours it while privacyStatus is private, so this forces
+        private unless an explicit privacy is passed. Pass publish_at="" to
+        clear the schedule and leave the video private indefinitely.
+        """
         yt = get_yt()
         current = yt.call(
             yt.data.videos().list(part="snippet,status", id=video_id), op="list"
@@ -143,6 +156,17 @@ def register(mcp) -> None:
         if privacy is not None:
             status["privacyStatus"] = privacy
             changes["privacy"] = privacy
+        if publish_at is not None:
+            if publish_at == "":
+                status.pop("publishAt", None)
+                changes["publish_at"] = "cleared"
+            else:
+                status["publishAt"] = publish_at
+                changes["publish_at"] = publish_at
+                # A scheduled video must be private, or YouTube drops the time.
+                if status.get("privacyStatus") != "private":
+                    status["privacyStatus"] = "private"
+                    changes["privacy"] = "private (forced by publish_at)"
         if dry_run:
             return preview("update_video", {"video_id": video_id, **changes})
         body = {"id": video_id, "snippet": snippet, "status": status}
