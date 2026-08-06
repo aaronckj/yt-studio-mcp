@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-studio-mcp"
-version = "0.5.0"
+version = "0.6.0"
 description = "MCP server for managing a YouTube channel: videos, comments, playlists, live streams, analytics, and auditable comment-entry giveaways."
 readme = "README.md"
 license = "MIT"
