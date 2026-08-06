@@ -40,6 +40,27 @@ def register(mcp) -> None:
         return [_thread_summary(t) for t in items]
 
     @mcp.tool()
+    def list_held_comments(limit: int = 100, status: str = "heldForReview") -> list[dict]:
+        """Comments awaiting moderation, channel-wide.
+
+        Held comments are invisible to the public until approved, so without
+        this they simply accumulate unseen — the scan pipeline could flag them
+        but nothing could show them for review. status: heldForReview |
+        likelySpam | published. Approve or reject with moderate_comment.
+        """
+        yt = get_yt()
+        items = yt.paginate(
+            yt.data.commentThreads(),
+            "list",
+            limit=limit,
+            part="snippet",
+            allThreadsRelatedToChannelId=_my_channel_id(yt),
+            moderationStatus=status,
+            textFormat="plainText",
+        )
+        return [_thread_summary(t) for t in items]
+
+    @mcp.tool()
     def post_video_question(video_id: str, text: str, dry_run: bool = False) -> dict:
         """Post a top-level comment on a video as the channel (e.g. a question
         prompt for viewers). Note: the API cannot pin comments — pin manually

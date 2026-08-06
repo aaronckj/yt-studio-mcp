@@ -43,6 +43,47 @@ def register(mcp) -> None:
         return {"created": res["id"], "title": title}
 
     @mcp.tool()
+    def update_playlist(
+        playlist_id: str,
+        title: str | None = None,
+        description: str | None = None,
+        privacy: str | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Rename a playlist or change its description/privacy.
+
+        Only supplied fields change. A playlist's title is the label a viewer
+        sees on every video in it, so this is how a series gets named without
+        recreating the playlist and losing its members and URL.
+        """
+        yt = get_yt()
+        cur = yt.call(
+            yt.data.playlists().list(part="snippet,status", id=playlist_id), op="list"
+        )["items"][0]
+        snippet = cur["snippet"]
+        status = cur.get("status", {})
+        changes = {}
+        if title is not None:
+            snippet["title"] = title
+            changes["title"] = title
+        if description is not None:
+            snippet["description"] = description
+            changes["description"] = f"{len(description)} chars"
+        if privacy is not None:
+            status["privacyStatus"] = privacy
+            changes["privacy"] = privacy
+        if dry_run:
+            return preview("update_playlist", {"playlist_id": playlist_id, **changes})
+        yt.call(
+            yt.data.playlists().update(
+                part="snippet,status",
+                body={"id": playlist_id, "snippet": snippet, "status": status},
+            ),
+            op="update",
+        )
+        return {"updated": playlist_id, "changes": changes}
+
+    @mcp.tool()
     def delete_playlist(playlist_id: str, dry_run: bool = False) -> dict:
         """Delete a playlist (videos are not deleted)."""
         if dry_run:

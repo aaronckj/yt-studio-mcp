@@ -52,6 +52,44 @@ def register(mcp) -> None:
         }
 
     @mcp.tool()
+    def update_channel(
+        description: str | None = None,
+        keywords: str | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Update the channel description or keywords.
+
+        The description is the channel's pitch — the first thing a visitor
+        reads and the only place the channel can state what it actually is.
+        keywords is a space-separated string; quote multi-word phrases.
+        """
+        yt = get_yt()
+        cur = yt.call(
+            yt.data.channels().list(part="brandingSettings", mine=True), op="list"
+        )["items"][0]
+        branding = cur.get("brandingSettings", {})
+        ch = branding.setdefault("channel", {})
+        changes = {}
+        if description is not None:
+            ch["description"] = description
+            changes["description"] = f"{len(description)} chars"
+        if keywords is not None:
+            ch["keywords"] = keywords
+            changes["keywords"] = keywords
+        if not changes:
+            return {"error": "nothing to update"}
+        if dry_run:
+            return preview("update_channel", changes)
+        yt.call(
+            yt.data.channels().update(
+                part="brandingSettings",
+                body={"id": cur["id"], "brandingSettings": branding},
+            ),
+            op="update",
+        )
+        return {"updated": cur["id"], "changes": changes}
+
+    @mcp.tool()
     def list_subscribers(limit: int = 50) -> dict:
         """List PUBLIC subscribers (YouTube only reveals subscribers who set
         their subscriptions public — most don't; totals live in channel_info)."""

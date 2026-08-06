@@ -85,6 +85,64 @@ def register(mcp) -> None:
         return result
 
     @mcp.tool()
+    def batch_update_tags(
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+        video_ids: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Add and/or remove tags across many videos at once.
+
+        Tags drift as a catalogue grows — a series tag added halfway through is
+        missing from everything before it. Existing tags are preserved; only
+        the named ones change. Scope: video_ids, or every upload when omitted.
+        Quota: ~51 units per changed video.
+        """
+        if not add and not remove:
+            return {"error": "supply add and/or remove"}
+        yt = get_yt()
+        if video_ids is None:
+            me = yt.call(
+                yt.data.channels().list(part="contentDetails", mine=True), op="list"
+            )["items"][0]
+            uploads = me["contentDetails"]["relatedPlaylists"]["uploads"]
+            items = yt.paginate(
+                yt.data.playlistItems(), "list", limit=500, part="snippet",
+                playlistId=uploads,
+            )
+            video_ids = [i["snippet"]["resourceId"]["videoId"] for i in items]
+        ids = video_ids
+        add_l = [t for t in (add or [])]
+        rm_l = {t.lower() for t in (remove or [])}
+        changed, skipped = [], 0
+        for vid in ids:
+            items = yt.call(
+                yt.data.videos().list(part="snippet", id=vid), op="list"
+            ).get("items", [])
+            if not items:
+                continue
+            sn = items[0]["snippet"]
+            cur = sn.get("tags", [])
+            new = [t for t in cur if t.lower() not in rm_l]
+            for t in add_l:
+                if t.lower() not in {x.lower() for x in new}:
+                    new.append(t)
+            if new == cur:
+                skipped += 1
+                continue
+            if not dry_run:
+                sn["tags"] = new
+                yt.call(
+                    yt.data.videos().update(
+                        part="snippet", body={"id": vid, "snippet": sn}
+                    ),
+                    op="update",
+                )
+            changed.append({"video_id": vid, "title": sn.get("title"), "tags": new})
+        out = {"changed": changed, "skipped": skipped}
+        return preview("batch_update_tags", out) if dry_run else out
+
+    @mcp.tool()
     def made_for_kids_audit() -> dict:
         """Audit every upload's made-for-kids designation (COPPA). Reports both
         the platform-effective flag and the self-declared one per video."""
