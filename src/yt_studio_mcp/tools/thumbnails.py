@@ -27,6 +27,43 @@ logger = logging.getLogger("yt_studio_mcp.thumbnails")
 OUT_DIR = Path.home() / ".config" / "yt-studio-mcp" / "thumbnails"
 
 
+def archive_thumbnail(src: str | Path, video_id: str | None = None,
+                      meta: dict | None = None) -> str | None:
+    """Keep a local copy of every thumbnail that reaches YouTube.
+
+    WHY. Two holes meant the image actually published was often the one NOT on
+    disk. set_thumbnail() uploaded an arbitrary path and kept nothing, so a
+    branded composite existed only wherever it was built -- stream 4 went live
+    with an auto frame-grab and the archive step had pointed at a copy that was
+    never written. And generate_thumbnail() named its output thumb-<stamp>.jpg,
+    so 59 accumulated files carried no clue which video each belonged to.
+
+    Named "<video_id>-<stamp>.jpg" when the video is known, and a .json sidecar
+    records where it came from. Archiving NEVER raises: failing to keep a copy
+    must not fail an upload that already succeeded.
+    """
+    try:
+        src = Path(src)
+        if not src.is_file():
+            return None
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        stem = f"{video_id}-{stamp}" if video_id else f"thumb-{stamp}"
+        dest = OUT_DIR / f"{stem}{src.suffix.lower() or '.jpg'}"
+        if src.resolve() != dest.resolve():
+            dest.write_bytes(src.read_bytes())
+        side = {"saved_at": stamp, "video_id": video_id,
+                "source_path": str(src), "bytes": dest.stat().st_size}
+        if meta:
+            side.update(meta)
+        (OUT_DIR / f"{stem}.json").write_text(json.dumps(side, indent=2))
+        logger.info("archived thumbnail -> %s", dest)
+        return str(dest)
+    except Exception:
+        logger.exception("thumbnail archive failed (upload itself unaffected)")
+        return None
+
+
 def finish_to_720(png_bytes: bytes, out_path: Path) -> None:
     """Center-crop to 16:9 and resize to 1280x720."""
     import io
@@ -175,8 +212,16 @@ def register(mcp) -> None:
             png = generate_image(prompt, quality)
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        out_path = OUT_DIR / f"thumb-{stamp}.jpg"
+        # Carry the video id in the NAME. Anonymous thumb-<stamp>.jpg files are
+        # unattributable once a few accumulate.
+        stem = f"{video_id}-{stamp}" if video_id else f"thumb-{stamp}"
+        out_path = OUT_DIR / f"{stem}.jpg"
         finish_to_720(png, out_path)
+        (OUT_DIR / f"{stem}.json").write_text(json.dumps(
+            {"saved_at": stamp, "video_id": video_id, "prompt": prompt,
+             "quality": quality, "reference_images": reference_images or [],
+             "model": os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-2"),
+             "generated": True}, indent=2))
         result: dict = {"thumbnail_path": str(out_path), "size": "1280x720"}
         if video_id:
             from googleapiclient.http import MediaFileUpload

@@ -7,3 +7,4 @@ dist/
 .ruff_cache/
 credentials.json
 client_secret*.json
+.backups/

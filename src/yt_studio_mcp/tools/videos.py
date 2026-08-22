@@ -225,7 +225,17 @@ def register(mcp) -> None:
             ),
             op="thumbnails.set",
         )
-        return {"thumbnail_set": video_id}
+        # Keep a local copy of what actually went live. Without this the
+        # published image existed only wherever it happened to be built --
+        # typically a share or a /tmp path that later got cleaned up.
+        from .thumbnails import archive_thumbnail
+
+        saved = archive_thumbnail(image_path, video_id=video_id,
+                                  meta={"via": "set_thumbnail"})
+        out = {"thumbnail_set": video_id}
+        if saved:
+            out["archived_to"] = saved
+        return out
 
     @mcp.tool()
     def upload_video(
