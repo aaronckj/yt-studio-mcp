@@ -36,6 +36,7 @@ EXPECTED = {
     "quota_status", "health_check",
     # twitch (multistream metadata; the video is mirrored, the title is not)
     "twitch_status", "twitch_get_channel", "twitch_set_channel",
+    "twitch_authorize_url", "twitch_finish_auth",
 }
 
 
