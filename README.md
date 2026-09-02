@@ -47,11 +47,48 @@ claude mcp add yt-studio -s user -- uvx yt-studio-mcp
 | Captions | `list_captions`, `upload_caption`, `download_caption` |
 | Analytics | `channel_report`, `video_report`, `top_videos` |
 | Giveaways | `collect_entries`, `draw_winners`, `make_verification_code`, `check_verification_reply`, `post_winner_reply` |
+| Twitch | `twitch_status`, `twitch_get_channel`, `twitch_set_channel` |
 | Meta | `quota_status`, `health_check` |
 
 Known API limitations (documented, not bugs): comments cannot be pinned via
 the API (`post_video_question` reminds you to pin manually in Studio), and
 Community-tab posts have no public API.
+
+### Multistreaming to Twitch
+
+Multistream plugins (Aitum, Restream) mirror the **video** to Twitch but not the
+**metadata** — Twitch keeps whatever title and category were set last, so a new
+stream goes out under the previous stream's name. `create_broadcast` therefore
+sets the Twitch title/category too (`twitch=True` by default, `twitch_game`
+strongly recommended); pass `twitch=False` to skip it. A Twitch failure never
+fails the YouTube broadcast — it is reported in the result.
+
+One-time setup:
+
+1. Create an application at <https://dev.twitch.tv/console/apps> with the OAuth
+   redirect URL set to exactly `http://localhost:8271`.
+2. Run, as the channel owner:
+
+   ```bash
+   yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret>
+   ```
+
+   On a **headless** box the local listener cannot catch the redirect -- it goes
+   to the *browser's* localhost, not the server's. Do this instead:
+
+   ```bash
+   yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret> --print-url
+   # open that URL anywhere, let the redirect fail, copy ?code=... from the bar
+   yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret> --code <code>
+   ```
+
+   Authorization codes expire in minutes -- paste promptly.
+
+This stores `twitch_client_id`, `twitch_client_secret` and
+`twitch_refresh_token` in the configured secret backend. The grant needs the
+`channel:manage:broadcast` scope — an app (client-credentials) token cannot
+modify a channel. Twitch rotates refresh tokens, and the rotated value is
+persisted automatically (except on the read-only `env` backend).
 
 ## Running a giveaway
 

@@ -36,12 +36,26 @@ def register(mcp) -> None:
         start_time: str,
         privacy: str = "public",
         description: str = "",
+        twitch: bool = True,
+        twitch_title: str = "",
+        twitch_game: str = "",
         dry_run: bool = False,
     ) -> dict:
-        """Schedule a live broadcast. start_time is RFC3339 (e.g. 2026-08-01T18:00:00Z)."""
+        """Schedule a live broadcast. start_time is RFC3339 (e.g. 2026-08-01T18:00:00Z).
+
+        Multistream plugins (Aitum, Restream) copy the VIDEO to Twitch but NOT the
+        metadata, so by default this also sets the Twitch title/category. Twitch
+        reuses `title` unless twitch_title is given; twitch_game sets the category
+        and is strongly recommended -- otherwise Twitch keeps the PREVIOUS stream's
+        game. Pass twitch=False for a YouTube-only broadcast. If Twitch is not
+        configured the YouTube broadcast still succeeds and the result says why.
+        """
         if dry_run:
             return preview(
-                "create_broadcast", {"title": title, "start_time": start_time, "privacy": privacy}
+                "create_broadcast",
+                {"title": title, "start_time": start_time, "privacy": privacy,
+                 "twitch": twitch, "twitch_title": twitch_title or title,
+                 "twitch_game": twitch_game},
             )
         yt = get_yt()
         res = yt.call(
@@ -59,7 +73,20 @@ def register(mcp) -> None:
             ),
             op="insert",
         )
-        return {"created": res["id"], "title": title, "scheduled_start": start_time}
+        out = {"created": res["id"], "title": title, "scheduled_start": start_time}
+        if twitch:
+            # The YouTube broadcast is already created; a Twitch failure must be
+            # reported, never raised, or a working broadcast looks like a failure.
+            from ..twitch import TwitchNotConfigured, set_channel
+
+            try:
+                out["twitch"] = set_channel(twitch_title or title, twitch_game or None)
+            except TwitchNotConfigured as exc:
+                out["twitch"] = {"configured": False, "missing": exc.missing,
+                                 "hint": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
+                out["twitch"] = {"error": str(exc)}
+        return out
 
     @mcp.tool()
     def list_streams(limit: int = 10) -> list[dict]:
