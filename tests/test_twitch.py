@@ -67,19 +67,19 @@ def test_set_channel_resolves_category_and_patches(monkeypatch):
     calls = []
     table = {
         "oauth2/token": {"access_token": "atok", "refresh_token": "rtok"},
-        "helix/users": {"data": [{"id": "42", "login": "thecipher"}]},
-        "helix/games": {"data": [{"id": "999", "name": "Hollow Knight: Silksong"}]},
-        "helix/channels": {"data": [{"title": "old", "game_name": "Hollow Knight"}]},
+        "helix/users": {"data": [{"id": "42", "login": "examplechannel"}]},
+        "helix/games": {"data": [{"id": "999", "name": "Example Game"}]},
+        "helix/channels": {"data": [{"title": "old", "game_name": "Old Game"}]},
     }
     monkeypatch.setattr(tw, "urlopen", _router(calls, table))
-    out = tw.set_channel("Silksong Stream 12", "Hollow Knight: Silksong")
+    out = tw.set_channel("Stream 12", "Example Game")
     patches = [c for c in calls if c[0] == "PATCH"]
     assert len(patches) == 1, "channel must be modified exactly once"
     body = json.loads(patches[0][2])
-    assert body["title"] == "Silksong Stream 12"
+    assert body["title"] == "Stream 12"
     assert body["game_id"] == "999", "must send game_id, not the name"
-    assert out["category_resolved"] == "Hollow Knight: Silksong"
-    assert out["login"] == "thecipher"
+    assert out["category_resolved"] == "Example Game"
+    assert out["login"] == "examplechannel"
 
 
 def test_unknown_category_raises_before_patching(monkeypatch):
