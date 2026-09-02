@@ -73,6 +73,17 @@ One-time setup:
    yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret>
    ```
 
+   On a **headless** box the local listener cannot catch the redirect -- it goes
+   to the *browser's* localhost, not the server's. Do this instead:
+
+   ```bash
+   yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret> --print-url
+   # open that URL anywhere, let the redirect fail, copy ?code=... from the bar
+   yt-studio-mcp twitch-auth --client-id <id> --client-secret <secret> --code <code>
+   ```
+
+   Authorization codes expire in minutes -- paste promptly.
+
 This stores `twitch_client_id`, `twitch_client_secret` and
 `twitch_refresh_token` in the configured secret backend. The grant needs the
 `channel:manage:broadcast` scope — an app (client-credentials) token cannot

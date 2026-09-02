@@ -47,6 +47,44 @@ class _Catch(http.server.BaseHTTPRequestHandler):
         return
 
 
+def authorize_url(client_id: str, state: str) -> str:
+    params = urllib.parse.urlencode({
+        "client_id": client_id,
+        "redirect_uri": REDIRECT,
+        "response_type": "code",
+        "scope": SCOPES,
+        "state": state,
+        "force_verify": "true",
+    })
+    return f"{OAUTH}/authorize?{params}"
+
+
+def exchange_code(client_id: str, client_secret: str, code: str) -> str:
+    """Finish the flow from a pasted ?code=... value.
+
+    The listener below only works when the browser runs on the SAME machine --
+    the redirect goes to the browser's own localhost. On a headless box, open
+    the printed URL anywhere, let it fail to load, and paste the code from the
+    address bar into `twitch-auth --code`.
+    """
+    body = urllib.parse.urlencode({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": REDIRECT,
+    }).encode()
+    req = Request(f"{OAUTH}/token", data=body, method="POST",
+                  headers={"content-type": "application/x-www-form-urlencoded"})
+    with urlopen(req, timeout=20) as resp:
+        tok = json.loads(resp.read())
+    store = get_store()
+    store.set("twitch_client_id", client_id)
+    store.set("twitch_client_secret", client_secret)
+    store.set("twitch_refresh_token", tok["refresh_token"])
+    return "Twitch connected; refresh token stored. scopes: " + ",".join(tok.get("scope") or [])
+
+
 def run_twitch_auth(client_id: str, client_secret: str) -> str:
     state = pysecrets.token_urlsafe(16)
     params = urllib.parse.urlencode({

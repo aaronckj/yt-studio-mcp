@@ -35,6 +35,17 @@ def main() -> None:
     tw_p.add_argument(
         "--client-secret", required=True, help="Twitch application client secret"
     )
+    tw_p.add_argument(
+        "--code",
+        default="",
+        help="finish a headless flow: paste the ?code=... value from the "
+        "redirect URL instead of running the local listener",
+    )
+    tw_p.add_argument(
+        "--print-url",
+        action="store_true",
+        help="print the authorize URL and exit (open it on any machine)",
+    )
     sub.add_parser("serve", help="run the MCP server (default)")
     sub.add_parser("scan", help="headless spam scan for cron (see scan --help)")
     sub.add_parser("collect", help="freeze giveaway entries at close (see collect --help)")
@@ -48,8 +59,19 @@ def main() -> None:
         return
 
     if args.command == "twitch-auth":
-        from .twitch_auth import run_twitch_auth
+        from .twitch_auth import authorize_url, exchange_code, run_twitch_auth
 
+        if args.print_url:
+            import secrets as _s
+
+            print(authorize_url(args.client_id, _s.token_urlsafe(16)))
+            return
+        if args.code:
+            print(
+                exchange_code(args.client_id, args.client_secret, args.code),
+                file=sys.stderr,
+            )
+            return
         print(run_twitch_auth(args.client_id, args.client_secret), file=sys.stderr)
         return
 
