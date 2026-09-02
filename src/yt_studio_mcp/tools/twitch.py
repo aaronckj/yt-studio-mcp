@@ -93,7 +93,7 @@ def register(mcp) -> None:
 
         Multistream plugins carry the video, not the metadata -- without this the
         Twitch channel keeps the PREVIOUS stream's title. game_name is resolved
-        to a Twitch category id ("Hollow Knight: Silksong" -> id).
+        to a Twitch category id ("Example Game" -> id).
         """
         if not title and not game_name and tags is None:
             return {"error": "nothing to set: pass title, game_name and/or tags"}
