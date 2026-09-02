@@ -13,17 +13,21 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import secrets as pysecrets
 import threading
 import urllib.parse
 import webbrowser
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .secrets import get_store
 from .twitch import OAUTH, SCOPES
 
-REDIRECT = "http://localhost:8271"
-PORT = 8271
+# Twitch matches the redirect EXACTLY -- a trailing slash is a different URI.
+# Override with TWITCH_REDIRECT_URI to match whatever the app has registered.
+REDIRECT = os.environ.get("TWITCH_REDIRECT_URI", "http://localhost:8271")
+PORT = int(urllib.parse.urlsplit(REDIRECT).port or 8271)
 
 
 class _Catch(http.server.BaseHTTPRequestHandler):
@@ -76,8 +80,19 @@ def exchange_code(client_id: str, client_secret: str, code: str) -> str:
     }).encode()
     req = Request(f"{OAUTH}/token", data=body, method="POST",
                   headers={"content-type": "application/x-www-form-urlencoded"})
-    with urlopen(req, timeout=20) as resp:
-        tok = json.loads(resp.read())
+    try:
+        with urlopen(req, timeout=20) as resp:
+            tok = json.loads(resp.read())
+    except HTTPError as exc:
+        # A bare "HTTP Error 400" hides the only thing that matters. Twitch
+        # returns a JSON message naming the actual fault (expired code, reused
+        # code, redirect_uri mismatch). Surface it; it contains no secret.
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise SystemExit(
+            f"Twitch rejected the code exchange (HTTP {exc.code}): {detail}\n"
+            f"redirect_uri sent: {REDIRECT!r} -- this must match the authorize "
+            f"request AND the app's registered URL byte for byte."
+        ) from exc
     store = get_store()
     store.set("twitch_client_id", client_id)
     store.set("twitch_client_secret", client_secret)
