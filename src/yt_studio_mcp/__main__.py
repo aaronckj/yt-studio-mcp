@@ -31,9 +31,16 @@ def main() -> None:
         help="path to the OAuth client_secret.json downloaded from Google Cloud",
     )
     tw_p = sub.add_parser("twitch-auth", help="one-time Twitch OAuth consent")
-    tw_p.add_argument("--client-id", required=True, help="Twitch application client id")
     tw_p.add_argument(
-        "--client-secret", required=True, help="Twitch application client secret"
+        "--client-id",
+        default="",
+        help="Twitch application client id (default: $TWITCH_CLIENT_ID)",
+    )
+    tw_p.add_argument(
+        "--client-secret",
+        default="",
+        help="Twitch application client secret (default: $TWITCH_CLIENT_SECRET). "
+        "Prefer the env var: argv is visible in `ps`.",
     )
     tw_p.add_argument(
         "--code",
@@ -59,7 +66,20 @@ def main() -> None:
         return
 
     if args.command == "twitch-auth":
+        import os
+
         from .twitch_auth import authorize_url, exchange_code, run_twitch_auth
+
+        # Env first so the secret never lands in argv / shell history / `ps`.
+        args.client_id = args.client_id or os.environ.get("TWITCH_CLIENT_ID", "")
+        args.client_secret = args.client_secret or os.environ.get(
+            "TWITCH_CLIENT_SECRET", ""
+        )
+        if not args.client_id or not args.client_secret:
+            raise SystemExit(
+                "need a Twitch client id and secret: pass --client-id/--client-secret "
+                "or set TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET"
+            )
 
         if args.print_url:
             import secrets as _s
