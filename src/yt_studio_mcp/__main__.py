@@ -30,6 +30,11 @@ def main() -> None:
         required=True,
         help="path to the OAuth client_secret.json downloaded from Google Cloud",
     )
+    tw_p = sub.add_parser("twitch-auth", help="one-time Twitch OAuth consent")
+    tw_p.add_argument("--client-id", required=True, help="Twitch application client id")
+    tw_p.add_argument(
+        "--client-secret", required=True, help="Twitch application client secret"
+    )
     sub.add_parser("serve", help="run the MCP server (default)")
     sub.add_parser("scan", help="headless spam scan for cron (see scan --help)")
     sub.add_parser("collect", help="freeze giveaway entries at close (see collect --help)")
@@ -40,6 +45,12 @@ def main() -> None:
         from .auth import run_auth_flow
 
         print(run_auth_flow(args.client_secret), file=sys.stderr)
+        return
+
+    if args.command == "twitch-auth":
+        from .twitch_auth import run_twitch_auth
+
+        print(run_twitch_auth(args.client_id, args.client_secret), file=sys.stderr)
         return
 
     from .server import build_app

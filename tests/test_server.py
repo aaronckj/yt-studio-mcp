@@ -34,6 +34,8 @@ EXPECTED = {
     "generate_thumbnail",
     # meta
     "quota_status", "health_check",
+    # twitch (multistream metadata; the video is mirrored, the title is not)
+    "twitch_status", "twitch_get_channel", "twitch_set_channel",
 }
 
 
