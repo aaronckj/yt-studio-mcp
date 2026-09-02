@@ -94,10 +94,18 @@ def exchange_code(client_id: str, client_secret: str, code: str) -> str:
             f"request AND the app's registered URL byte for byte."
         ) from exc
     store = get_store()
-    store.set("twitch_client_id", client_id)
-    store.set("twitch_client_secret", client_secret)
+    # Only persist what the environment does not already supply. When the
+    # credentials are injected from a vault at launch, copying them into the
+    # on-disk store just creates a second place the secret can leak from.
+    from_env = bool(os.environ.get("TWITCH_CLIENT_SECRET"))
+    if not from_env:
+        store.set("twitch_client_id", client_id)
+        store.set("twitch_client_secret", client_secret)
     store.set("twitch_refresh_token", tok["refresh_token"])
-    return "Twitch connected; refresh token stored. scopes: " + ",".join(tok.get("scope") or [])
+    where = "refresh token only (client id/secret stay in the vault)" if from_env \
+        else "client id, secret and refresh token"
+    return (f"Twitch connected; stored {where}. scopes: "
+            + ",".join(tok.get("scope") or []))
 
 
 def run_twitch_auth(client_id: str, client_secret: str) -> str:
