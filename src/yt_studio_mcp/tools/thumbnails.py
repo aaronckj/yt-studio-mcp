@@ -21,10 +21,15 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..client import preview
+from ..paths import thumbnails_dir
 
 logger = logging.getLogger("yt_studio_mcp.thumbnails")
 
-OUT_DIR = Path.home() / ".config" / "yt-studio-mcp" / "thumbnails"
+
+def __getattr__(name: str):
+    if name == "OUT_DIR":  # back-compat for the former constant
+        return thumbnails_dir()
+    raise AttributeError(name)
 
 
 def archive_thumbnail(src: str | Path, video_id: str | None = None,
@@ -46,17 +51,17 @@ def archive_thumbnail(src: str | Path, video_id: str | None = None,
         src = Path(src)
         if not src.is_file():
             return None
-        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        thumbnails_dir().mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         stem = f"{video_id}-{stamp}" if video_id else f"thumb-{stamp}"
-        dest = OUT_DIR / f"{stem}{src.suffix.lower() or '.jpg'}"
+        dest = thumbnails_dir() / f"{stem}{src.suffix.lower() or '.jpg'}"
         if src.resolve() != dest.resolve():
             dest.write_bytes(src.read_bytes())
         side = {"saved_at": stamp, "video_id": video_id,
                 "source_path": str(src), "bytes": dest.stat().st_size}
         if meta:
             side.update(meta)
-        (OUT_DIR / f"{stem}.json").write_text(json.dumps(side, indent=2))
+        (thumbnails_dir() / f"{stem}.json").write_text(json.dumps(side, indent=2))
         logger.info("archived thumbnail -> %s", dest)
         return str(dest)
     except Exception:
@@ -210,14 +215,14 @@ def register(mcp) -> None:
             png = generate_image_with_refs(prompt, quality, reference_images)
         else:
             png = generate_image(prompt, quality)
-        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        thumbnails_dir().mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         # Carry the video id in the NAME. Anonymous thumb-<stamp>.jpg files are
         # unattributable once a few accumulate.
         stem = f"{video_id}-{stamp}" if video_id else f"thumb-{stamp}"
-        out_path = OUT_DIR / f"{stem}.jpg"
+        out_path = thumbnails_dir() / f"{stem}.jpg"
         finish_to_720(png, out_path)
-        (OUT_DIR / f"{stem}.json").write_text(json.dumps(
+        (thumbnails_dir() / f"{stem}.json").write_text(json.dumps(
             {"saved_at": stamp, "video_id": video_id, "prompt": prompt,
              "quality": quality, "reference_images": reference_images or [],
              "model": os.environ.get("YT_MCP_IMAGE_MODEL", "gpt-image-2"),

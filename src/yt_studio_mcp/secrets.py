@@ -11,7 +11,14 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_PATH = Path.home() / ".config" / "yt-studio-mcp" / "credentials.json"
+from .paths import credentials_path
+
+
+def __getattr__(name: str):
+    # Back-compat: DEFAULT_PATH used to be a module constant.
+    if name == "DEFAULT_PATH":
+        return credentials_path()
+    raise AttributeError(name)
 
 
 class SecretStore:
@@ -24,7 +31,7 @@ class SecretStore:
 
 class FileStore(SecretStore):
     def __init__(self, path: Path | None = None):
-        self.path = Path(path or DEFAULT_PATH)
+        self.path = Path(path) if path else credentials_path()
 
     def _load(self) -> dict:
         if not self.path.exists():
@@ -59,10 +66,12 @@ class VaultproxyStore(SecretStore):
         self.base_url = (
             base_url or os.environ.get("VAULTPROXY_URL", "http://127.0.0.1:8199")
         ).rstrip("/")
+        # One vault namespace per instance when several channels share a vault.
+        self.prefix = os.environ.get("YT_MCP_VAULTPROXY_PREFIX", "yt-studio-mcp")
 
     def _request(self, method: str, key: str, body: dict | None = None) -> dict:
         req = Request(
-            f"{self.base_url}/items/yt-studio-mcp%2F{key}",
+            f"{self.base_url}/items/{self.prefix}%2F{key}",
             method=method,
             data=json.dumps(body).encode() if body is not None else None,
             headers={"content-type": "application/json"},

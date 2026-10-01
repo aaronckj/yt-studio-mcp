@@ -22,8 +22,8 @@ logger = logging.getLogger("yt_studio_mcp")
 
 
 def _config_dir():
-    from pathlib import Path
-    return Path.home() / ".config" / "yt-studio-mcp"
+    from .paths import config_dir
+    return config_dir()
 
 
 def _write_live_status(is_live: bool, title: str, held: int) -> None:

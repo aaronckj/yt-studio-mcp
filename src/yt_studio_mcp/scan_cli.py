@@ -38,17 +38,16 @@ def notify(matches: list[dict]) -> None:
 def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> int:
     from .client import get_yt
     from .llm import classify_comment, llm_configured
-    from .tools.banned_words import (
-        SCAN_STATE_PATH,
-        _load_words,
-        match_comment,
-    )
+    from .paths import scan_state_path
+    from .tools.banned_words import _load_words, match_comment
+
+    state_path = scan_state_path()
 
     yt = get_yt()
     words = _load_words()
     watermark = None
-    if incremental and SCAN_STATE_PATH.exists():
-        watermark = json.loads(SCAN_STATE_PATH.read_text()).get("last_scan")
+    if incremental and state_path.exists():
+        watermark = json.loads(state_path.read_text()).get("last_scan")
 
     me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
     channel_id = me["items"][0]["id"]  # own comments are exempt below
@@ -103,8 +102,8 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
             )
 
     if incremental and newest:
-        SCAN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SCAN_STATE_PATH.write_text(json.dumps({"last_scan": newest}))
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({"last_scan": newest}))
 
     report = {
         "checked_new": checked,
@@ -121,9 +120,10 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
 def _append_history(report: dict) -> None:
     """Append a timestamped run record to scan_history.jsonl (dashboard feed)."""
     from datetime import UTC, datetime
-    from pathlib import Path
 
-    path = Path.home() / ".config" / "yt-studio-mcp" / "scan_history.jsonl"
+    from .paths import scan_history_path
+
+    path = scan_history_path()
     record = {"ts": datetime.now(UTC).isoformat(timespec="seconds"), **report}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

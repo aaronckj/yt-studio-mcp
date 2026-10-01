@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 from ..client import get_yt, preview
+from ..paths import question_state_path
 
-STATE_PATH = Path.home() / ".config" / "yt-studio-mcp" / "question_comments.json"
+
+def __getattr__(name: str):
+    if name == "STATE_PATH":  # back-compat for the former constant
+        return question_state_path()
+    raise AttributeError(name)
 
 
 def build_question_comment(question: str, rules_url: str) -> str:
@@ -29,14 +33,14 @@ def build_question_comment(question: str, rules_url: str) -> str:
 
 
 def _load_state() -> dict:
-    if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text())
+    if question_state_path().exists():
+        return json.loads(question_state_path().read_text())
     return {}
 
 
 def _save_state(state: dict) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2))
+    question_state_path().parent.mkdir(parents=True, exist_ok=True)
+    question_state_path().write_text(json.dumps(state, indent=2))
 
 
 def studio_comments_url(video_id: str) -> str:

@@ -17,19 +17,26 @@ from pathlib import Path
 from random import Random
 
 from ..client import get_yt, preview
+from ..paths import giveaway_dir
 
-SNAPSHOT_DIR = Path.home() / ".config" / "yt-studio-mcp" / "giveaways"
+
+def __getattr__(name: str):
+    if name == "SNAPSHOT_DIR":  # back-compat for the former constant
+        return giveaway_dir()
+    raise AttributeError(name)
+
+
 ALGO_VERSION = "v1"
 
 
 def resolve_giveaway_path(path: str) -> Path:
-    """Resolve a snapshot/audit/CSV path, refusing anything outside SNAPSHOT_DIR.
+    """Resolve a snapshot/audit/CSV path, refusing anything outside the giveaway dir.
 
     Guards against path traversal / arbitrary file access if a hostile prompt
     (e.g. injected via comment text) steers tool arguments.
     """
     rp = Path(path).expanduser().resolve()
-    base = SNAPSHOT_DIR.resolve()
+    base = giveaway_dir().resolve()
     if not rp.is_relative_to(base):
         raise ValueError(f"path must be inside {base}")
     return rp
@@ -150,9 +157,9 @@ def register(mcp) -> None:
             raw, start, end, max_entries_per_user, [own_id, *(exclude_channel_ids or [])]
         )
         digest = canonical_hash(entries)
-        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        giveaway_dir().mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        snapshot_path = SNAPSHOT_DIR / f"entries-{stamp}.json"
+        snapshot_path = giveaway_dir() / f"entries-{stamp}.json"
         snapshot_path.write_text(
             json.dumps(
                 {

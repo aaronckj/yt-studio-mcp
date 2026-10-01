@@ -33,7 +33,10 @@ def notify(msg: str) -> None:
 
 def run_collect(start: str, end: str, max_per_user: int, exclude: list[str]) -> int:
     from .client import get_yt
-    from .tools.giveaway import ALGO_VERSION, SNAPSHOT_DIR, build_entries, canonical_hash
+    from .paths import giveaway_dir
+    from .tools.giveaway import ALGO_VERSION, build_entries, canonical_hash
+
+    snapshot_dir = giveaway_dir()
 
     yt = get_yt()
     me = yt.call(yt.data.channels().list(part="id,contentDetails", mine=True), op="list")[
@@ -64,9 +67,9 @@ def run_collect(start: str, end: str, max_per_user: int, exclude: list[str]) -> 
 
     entries = build_entries(raw, start, end, max_per_user, [own_id, *exclude])
     digest = canonical_hash(entries)
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    snapshot_path = SNAPSHOT_DIR / f"entries-{stamp}.json"
+    snapshot_path = snapshot_dir / f"entries-{stamp}.json"
     snapshot_path.write_text(json.dumps({
         "algo": ALGO_VERSION, "window": {"start": start, "end": end},
         "max_entries_per_user": max_per_user, "excluded": [own_id, *exclude],

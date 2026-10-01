@@ -120,19 +120,49 @@ capped per person; winners drawn at random.*
 5. post_winner_reply(comment_id, "Congratulations! ...")
 ```
 
-Entries and audit records live in `~/.config/yt-studio-mcp/giveaways/`.
+Entries and audit records live in `<config dir>/giveaways/` (default
+`~/.config/yt-studio-mcp/giveaways/`; see *Multiple channels*).
 
 *This tool automates entry collection and drawing; giveaway laws vary by
 jurisdiction and platform policies apply (e.g. YouTube's contest policies).
 You are responsible for your own official rules and compliance.*
 
+## Multiple channels
+
+One server instance manages one channel. To manage several, run **one instance
+per channel**, each with its own state directory:
+
+| Variable | Default | Holds |
+|---|---|---|
+| `YT_MCP_CONFIG_DIR` | `~/.config/yt-studio-mcp` | credentials (file backend), banned words + scan watermark, scan history, live status, giveaway snapshots, question-comment tracking, archived thumbnails |
+| `YT_MCP_CREDENTIALS_FILE` | `<config dir>/credentials.json` | the file-backend credentials only |
+| `YT_MCP_VAULTPROXY_PREFIX` | `yt-studio-mcp` | vault item namespace (vaultproxy backend only) |
+
+Nothing is shared between directories, so instances never see each other's
+tokens, wordlists or giveaway files. Leaving the variables unset keeps the
+original single-channel layout.
+
+```bash
+# authorize the second channel into its own directory
+YT_MCP_CONFIG_DIR=~/.config/yt-studio-mcp-second \
+  uvx yt-studio-mcp auth --client-secret ~/.config/yt-studio-mcp-second/client_secret.json
+
+# register it alongside the first
+claude mcp add yt-second -s user -e YT_MCP_CONFIG_DIR=$HOME/.config/yt-studio-mcp-second \
+  -- uvx yt-studio-mcp
+```
+
+The same Google OAuth client can authorize any number of channels; in the
+consent screen pick the channel (Brand Accounts are listed separately). The
+headless `scan`, `collect` and `watch` commands honour the same variable.
+
 ## Secret storage
 
 | Backend | Select with | Stores |
 |---|---|---|
-| `file` (default) | — | `~/.config/yt-studio-mcp/credentials.json`, chmod 0600 |
+| `file` (default) | — | `<config dir>/credentials.json` (default `~/.config/yt-studio-mcp/`), chmod 0600; `YT_MCP_CREDENTIALS_FILE` overrides |
 | `env` | `YT_MCP_SECRETS=env` | reads `YT_MCP_REFRESH_TOKEN`, `YT_MCP_CLIENT_ID`, `YT_MCP_CLIENT_SECRET` |
-| `vaultproxy` | `YT_MCP_SECRETS=vaultproxy` (+ `VAULTPROXY_URL`) | items in a Vaultwarden vault via a local vaultproxy HTTP API |
+| `vaultproxy` | `YT_MCP_SECRETS=vaultproxy` (+ `VAULTPROXY_URL`) | items `<prefix>/<key>` in a Vaultwarden vault via a local vaultproxy HTTP API; prefix `YT_MCP_VAULTPROXY_PREFIX` (default `yt-studio-mcp`) |
 
 ## Quota
 

@@ -12,12 +12,20 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from ..client import get_yt, preview
+from ..paths import scan_state_path, wordlist_path
 
-WORDLIST_PATH = Path.home() / ".config" / "yt-studio-mcp" / "banned_words.json"
-SCAN_STATE_PATH = Path.home() / ".config" / "yt-studio-mcp" / "scan_state.json"
+
+def __getattr__(name: str):
+    # Back-compat for the former module constants.
+    if name == "WORDLIST_PATH":
+        return wordlist_path()
+    if name == "SCAN_STATE_PATH":
+        return scan_state_path()
+    raise AttributeError(name)
+
+
 _SEP = re.compile(r"[\s\.\-_,!\$\*\|]+")
 
 
@@ -26,14 +34,14 @@ def normalize(text: str) -> str:
 
 
 def _load_words() -> list[str]:
-    if WORDLIST_PATH.exists():
-        return json.loads(WORDLIST_PATH.read_text())
+    if wordlist_path().exists():
+        return json.loads(wordlist_path().read_text())
     return []
 
 
 def _save_words(words: list[str]) -> None:
-    WORDLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    WORDLIST_PATH.write_text(json.dumps(sorted(set(words)), indent=2))
+    wordlist_path().parent.mkdir(parents=True, exist_ok=True)
+    wordlist_path().write_text(json.dumps(sorted(set(words)), indent=2))
 
 
 def match_comment(text: str, words: list[str]) -> list[str]:
@@ -77,7 +85,7 @@ def register(mcp) -> None:
     @mcp.tool()
     def banned_words_list() -> dict:
         """Show the managed banned-word list used by scan_comments."""
-        return {"words": _load_words(), "path": str(WORDLIST_PATH)}
+        return {"words": _load_words(), "path": str(wordlist_path())}
 
     @mcp.tool()
     def banned_words_add(words: list[str]) -> dict:
@@ -110,8 +118,8 @@ def register(mcp) -> None:
         if auto_action not in ("none", "heldForReview", "rejected"):
             return {"error": "auto_action must be none|heldForReview|rejected"}
         watermark = None
-        if incremental and SCAN_STATE_PATH.exists():
-            watermark = json.loads(SCAN_STATE_PATH.read_text()).get("last_scan")
+        if incremental and scan_state_path().exists():
+            watermark = json.loads(scan_state_path().read_text()).get("last_scan")
         words = _load_words() + (extra_words or [])
         if not words:
             return {"error": "banned word list is empty; add words with banned_words_add"}
@@ -158,8 +166,8 @@ def register(mcp) -> None:
         if incremental:
             result["watermark_was"] = watermark
             if newest_seen and not dry_run:
-                SCAN_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                SCAN_STATE_PATH.write_text(json.dumps({"last_scan": newest_seen}))
+                scan_state_path().parent.mkdir(parents=True, exist_ok=True)
+                scan_state_path().write_text(json.dumps({"last_scan": newest_seen}))
                 result["watermark_now"] = newest_seen
         if auto_action != "none" and matches:
             if dry_run:
