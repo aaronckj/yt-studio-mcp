@@ -82,10 +82,10 @@ def _active_broadcast(yt):
 def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
     from .client import get_yt
     from .llm import classify_comment, llm_configured
-    from .tools.banned_words import _load_words, match_comment
+    from .tools.banned_words import load_wordlist_strict, match_comment
 
+    words = load_wordlist_strict()  # missing/corrupt list: refuse, don't watch blind
     yt = get_yt()
-    words = _load_words()
     own = yt.call(yt.data.channels().list(part="id", mine=True), op="list")["items"][0]["id"]
 
     b = _active_broadcast(yt)

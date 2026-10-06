@@ -5,9 +5,10 @@
 Tier 1: banned-word match (deterministic) → auto_action applies.
 Tier 2 (--llm, only if YT_MCP_LLM_URL/MODEL set): every remaining NEW comment
 is classified by the LLM; spam verdicts get auto_action too, tagged with the
-model's reason. Exit code: 0 = clean, 2 = matches found, 4 = incomplete
-(moderation failed or the limit cut the scan short; watermark held back on
-moderation failure), 1 = error.
+model's reason. Exit codes: 0 = clean, 2 = matches found, 4 = incomplete
+(moderation failed, an LLM call failed, or the limit cut the scan short --
+the watermark is NOT advanced), 5 = another scan holds the lock, 1 = error
+(including a missing/corrupt word list or watermark: the scan fails closed).
 Optional ntfy push: set YT_MCP_NTFY_URL to get a phone ping on matches.
 """
 
@@ -38,25 +39,36 @@ def notify(matches: list[dict]) -> None:
 
 
 def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> int:
+    from .tools.banned_words import ScanLocked, scan_lock
+
+    try:
+        with scan_lock():
+            return _run_scan_locked(incremental, auto_action, use_llm, limit)
+    except ScanLocked as exc:
+        logger.error("scan skipped: %s", exc)
+        print(json.dumps({"skipped": str(exc)}), file=sys.stderr)
+        return 5
+
+
+def _run_scan_locked(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> int:
     from .client import get_yt
-    from .llm import classify_comment, llm_configured
-    from .paths import scan_state_path
+    from .llm import llm_configured
     from .tools.banned_words import (
-        _load_words,
         apply_moderation,
+        load_wordlist_strict,
         match_comment,
+        read_watermark,
         truncation_gap,
         write_watermark,
     )
 
-    state_path = scan_state_path()
+    # Fail closed: both raise StateError on missing/corrupt state (exit 1).
+    words = load_wordlist_strict()
+    watermark = read_watermark() if incremental else None
+    if use_llm and not llm_configured():
+        raise RuntimeError("--llm given but YT_MCP_LLM_URL/YT_MCP_LLM_MODEL are not set")
 
     yt = get_yt()
-    words = _load_words()
-    watermark = None
-    if incremental and state_path.exists():
-        watermark = json.loads(state_path.read_text()).get("last_scan")
-
     me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
     channel_id = me["items"][0]["id"]  # own comments are exempt below
     threads, more = yt.paginate_more(
@@ -70,7 +82,10 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
         textFormat="plainText",
     )
 
+    from . import llm as llm_mod
+
     matches: list[dict] = []
+    llm_errors: list[dict] = []
     newest = watermark
     checked = 0
     for t in threads:
@@ -92,20 +107,28 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
             "author": author,
             "text": text[:200],
         }
-        hits = match_comment(text, words) if words else []
+        hits = match_comment(text, words)
         if hits:
             matches.append({**entry, "source": "wordlist", "matched": hits})
             continue
-        if use_llm and llm_configured():
-            verdict = classify_comment(author, text)
-            if verdict.get("spam"):
+        if use_llm:
+            verdict = llm_mod.classify_comment(author, text)
+            if "error" in verdict:
+                # An unclassified comment is NOT a clean comment.
+                llm_errors.append({"comment_id": entry["comment_id"],
+                                   "error": verdict["error"]})
+            elif verdict.get("spam"):
                 matches.append({**entry, "source": "llm", "reason": verdict["reason"]})
 
     failed: list[dict] = []
     if auto_action != "none" and matches:
         _, failed = apply_moderation(yt, matches, auto_action)
 
-    if incremental and newest and not failed:
+    gap = truncation_gap(threads, more, watermark)
+    complete = not (failed or gap or llm_errors)
+    # The watermark moves only when every new comment was read, classified
+    # and acted on; otherwise the next run looks at the same range again.
+    if incremental and newest and complete:
         write_watermark(newest)
 
     report = {
@@ -113,17 +136,20 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
         "matches": matches,
         "action": auto_action,
         "quota_spent": yt.quota.spent,
+        "watermark_advanced": bool(incremental and newest and complete),
     }
     if failed:
         report["moderation_failed"] = failed
-    gap = truncation_gap(threads, more, watermark)
+    if llm_errors:
+        report["llm_errors"] = llm_errors
     if gap:
         report["truncated"] = gap
     _append_history(report)
     print(json.dumps(report, indent=2))
     notify(matches)
-    if failed or gap:
-        logger.error("scan incomplete: failed=%d truncated=%s", len(failed), bool(gap))
+    if not complete:
+        logger.error("scan incomplete: moderation_failed=%d llm_errors=%d truncated=%s",
+                     len(failed), len(llm_errors), bool(gap))
         return 4
     return 2 if matches else 0
 
