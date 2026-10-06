@@ -76,3 +76,28 @@ def test_paginate_stops_at_limit():
     yt = YT(data_service=object())
     items = yt.paginate(FakeResource(), "list", limit=60)
     assert len(items) == 60
+
+
+def test_quota_ledger_survives_restart_and_can_be_shared(tmp_path, monkeypatch):
+    from yt_studio_mcp.client import QuotaTracker
+
+    shared = tmp_path / "shared-ledger.json"
+    monkeypatch.setenv("YT_MCP_QUOTA_LEDGER", str(shared))
+    YT(data_service=object()).call(FakeRequest(result={}), op="update")
+    YT(data_service=object()).call(FakeRequest(result={}), op="list")  # "restart"
+    assert QuotaTracker.today()["units"] == COSTS["update"] + COSTS["list"]
+    data = json.loads(shared.read_text())
+    data["day"] = "1999-01-01"
+    shared.write_text(json.dumps(data))
+    assert QuotaTracker.today()["units"] == 0  # a new Pacific day starts at zero
+
+
+def test_failed_upload_counts_quota():
+    class Up:
+        def next_chunk(self):
+            raise http_error(400, "invalidPublishAt")
+
+    yt = YT(data_service=object())
+    with pytest.raises(ApiError):
+        yt.upload(Up())
+    assert yt.quota.spent == COSTS["videos.insert"]

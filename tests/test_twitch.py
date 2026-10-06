@@ -152,3 +152,19 @@ def test_secrets_never_reach_the_error_message(monkeypatch):
     assert "SUPERSECRET" not in str(e.value)
     assert "TOK" not in str(e.value)
     assert "REDACTED" in str(e.value)
+
+
+def test_fuzzy_category_is_never_applied_silently(monkeypatch):
+    calls = []
+    table = {
+        "oauth2/token": {"access_token": "atok"},
+        "helix/users": {"data": [{"id": "42", "login": "x"}]},
+        "helix/games": {"data": []},
+        "search/categories": {"data": [{"id": "1", "name": "Example Game 2"},
+                                       {"id": "2", "name": "Example Gamer"}]},
+        "helix/channels": {"data": [{"title": "old", "game_name": "g"}]},
+    }
+    monkeypatch.setattr(tw, "urlopen", _router(calls, table))
+    with pytest.raises(tw.TwitchError, match="did you mean"):
+        tw.set_channel("t", "Example Game")
+    assert not [c for c in calls if c[0] == "PATCH"]

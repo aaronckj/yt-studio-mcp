@@ -69,6 +69,16 @@ def archive_thumbnail(src: str | Path, video_id: str | None = None,
         return None
 
 
+def _fetch_result_url(url: str) -> bytes:
+    """Download a generated image by URL -- https only. urlopen also speaks
+    file:// and plain http, so an API response could otherwise make this
+    process read a local file."""
+    if not isinstance(url, str) or not url.lower().startswith("https://"):
+        raise RuntimeError(f"refusing non-https image URL from the image API: {url!r:.80}")
+    with urlopen(url, timeout=60) as resp:
+        return resp.read()
+
+
 def finish_to_720(png_bytes: bytes, out_path: Path) -> None:
     """Center-crop to 16:9 and resize to 1280x720."""
     import io
@@ -120,8 +130,7 @@ def generate_image(prompt: str, quality: str) -> bytes:
     data = payload["data"][0]
     if "b64_json" in data:
         return base64.b64decode(data["b64_json"])
-    with urlopen(data["url"], timeout=60) as img_resp:
-        return img_resp.read()
+    return _fetch_result_url(data["url"])
 
 
 def _resize_ref(path: str, max_px: int = 1024) -> bytes:
@@ -183,8 +192,7 @@ def generate_image_with_refs(prompt: str, quality: str, references: list[str]) -
     d = payload["data"][0]
     if "b64_json" in d:
         return base64.b64decode(d["b64_json"])
-    with urlopen(d["url"], timeout=60) as r:
-        return r.read()
+    return _fetch_result_url(d["url"])
 
 
 def register(mcp) -> None:

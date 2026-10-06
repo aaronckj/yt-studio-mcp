@@ -11,15 +11,23 @@ WARN_FRACTION = 0.8
 def register(mcp) -> None:
     @mcp.tool()
     def quota_status() -> dict:
-        """Quota units spent this session (local estimate from the official cost table)."""
+        """Quota units spent this session and today (Pacific day, persisted
+        across restarts; local estimate from the official cost table)."""
+        from ..client import ledger_path
+
         yt = get_yt()
-        spent = yt.quota.spent
+        today = yt.quota.today()
         return {
-            "session_units_spent": spent,
+            "session_units_spent": yt.quota.spent,
             "session_calls": yt.quota.calls,
+            "today_units_spent": today["units"],
+            "quota_day": today["day"],
+            "ledger": str(ledger_path()),
             "daily_allocation": DAILY_QUOTA_DEFAULT,
-            "warning": spent >= DAILY_QUOTA_DEFAULT * WARN_FRACTION,
-            "note": "estimate; authoritative usage is in the Google Cloud console",
+            "warning": today["units"] >= DAILY_QUOTA_DEFAULT * WARN_FRACTION,
+            "note": "estimate counted by THIS ledger only; instances sharing a "
+                    "Google Cloud project should share YT_MCP_QUOTA_LEDGER. "
+                    "Authoritative usage is in the Google Cloud console.",
         }
 
     @mcp.tool()

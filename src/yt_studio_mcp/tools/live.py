@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..client import get_yt, preview
+from ..validate import check_future_schedule, check_privacy
 
 
 def register(mcp) -> None:
@@ -49,11 +50,19 @@ def register(mcp) -> None:
         and is strongly recommended -- otherwise Twitch keeps the PREVIOUS stream's
         game. Pass twitch=False for a YouTube-only broadcast. If Twitch is not
         configured the YouTube broadcast still succeeds and the result says why.
+        NOTE: privacy defaults to public -- the scheduled stream is listed on the
+        channel as soon as it is created -- and the Twitch title/category change
+        immediately, not at start_time.
         """
+        if err := check_privacy(privacy):
+            return {"error": err}
+        if err := check_future_schedule(start_time):
+            return {"error": err.replace("publish_at", "start_time")}
         if dry_run:
             return preview(
                 "create_broadcast",
                 {"title": title, "start_time": start_time, "privacy": privacy,
+                 "listed_publicly_now": privacy == "public",
                  "twitch": twitch, "twitch_title": twitch_title or title,
                  "twitch_game": twitch_game},
             )

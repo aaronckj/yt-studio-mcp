@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..client import get_yt, preview
+from ..validate import check_privacy
 
 
 def register(mcp) -> None:
@@ -27,6 +28,8 @@ def register(mcp) -> None:
         title: str, description: str = "", privacy: str = "public", dry_run: bool = False
     ) -> dict:
         """Create a playlist. privacy: public|unlisted|private."""
+        if err := check_privacy(privacy):
+            return {"error": err}
         if dry_run:
             return preview("create_playlist", {"title": title, "privacy": privacy})
         yt = get_yt()
@@ -56,10 +59,15 @@ def register(mcp) -> None:
         sees on every video in it, so this is how a series gets named without
         recreating the playlist and losing its members and URL.
         """
+        if privacy is not None and (err := check_privacy(privacy)):
+            return {"error": err}
         yt = get_yt()
-        cur = yt.call(
+        items = yt.call(
             yt.data.playlists().list(part="snippet,status", id=playlist_id), op="list"
-        )["items"][0]
+        ).get("items", [])
+        if not items:
+            return {"error": f"playlist not found: {playlist_id}"}
+        cur = items[0]
         snippet = cur["snippet"]
         status = cur.get("status", {})
         changes = {}
@@ -72,6 +80,8 @@ def register(mcp) -> None:
         if privacy is not None:
             status["privacyStatus"] = privacy
             changes["privacy"] = privacy
+        if not changes:
+            return {"error": "nothing to update"}
         if dry_run:
             return preview("update_playlist", {"playlist_id": playlist_id, **changes})
         yt.call(

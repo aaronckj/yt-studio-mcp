@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..client import get_yt
 
 
@@ -41,6 +43,10 @@ def register(mcp) -> None:
         metrics: str = "views,estimatedMinutesWatched,averageViewDuration,likes,comments",
     ) -> list[dict]:
         """Per-video analytics between start/end (YYYY-MM-DD)."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id or ""):
+            # Interpolated into the filters expression; ";" or "," would let a
+            # caller rewrite the query.
+            return [{"error": f"invalid video id: {video_id!r}"}]
         yt = get_yt()
         res = yt.call(
             yt.analytics.reports().query(

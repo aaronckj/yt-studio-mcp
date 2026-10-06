@@ -156,7 +156,14 @@ class Twitch:
         for it in items:
             if it["name"].lower() == name.lower():
                 return it
-        return items[0] if items else None
+        if items:
+            # Never fall back to the first fuzzy hit: that silently put a live
+            # channel under the wrong game. Make the caller pick.
+            raise TwitchError(
+                f"no exact Twitch category named {name!r}; did you mean one of: "
+                + ", ".join(repr(i["name"]) for i in items[:10])
+            )
+        return None
 
     def modify_channel(self, title: str | None = None, game_id: str | None = None,
                        tags: list[str] | None = None) -> None:

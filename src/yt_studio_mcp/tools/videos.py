@@ -85,9 +85,12 @@ def register(mcp) -> None:
         keywords is a space-separated string; quote multi-word phrases.
         """
         yt = get_yt()
-        cur = yt.call(
+        items = yt.call(
             yt.data.channels().list(part="brandingSettings", mine=True), op="list"
-        )["items"][0]
+        ).get("items", [])
+        if not items:
+            return {"error": "no channel for authorized account"}
+        cur = items[0]
         branding = cur.get("brandingSettings", {})
         ch = branding.setdefault("channel", {})
         changes = {}

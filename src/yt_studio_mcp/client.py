@@ -81,7 +81,35 @@ def map_http_error(exc: HttpError, op: str) -> ApiError:
     return ApiError(reason, exc.resp.status if exc.resp else 0, detail)
 
 
+QUOTA_LEDGER_ENV = "YT_MCP_QUOTA_LEDGER"
+
+
+def quota_day() -> str:
+    """YouTube quota resets at midnight Pacific; the ledger keys on that day."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
+
+
+def ledger_path():
+    from pathlib import Path
+
+    from .paths import config_dir
+
+    value = os.environ.get(QUOTA_LEDGER_ENV, "").strip()
+    return Path(value).expanduser() if value else config_dir() / "quota_ledger.json"
+
+
 class QuotaTracker:
+    """Per-process counter plus a persistent per-Pacific-day ledger.
+
+    The session counter alone reset on every restart and was compared against
+    the DAILY allocation. The ledger survives restarts; point several
+    instances that share one Google Cloud project (and so one 10k/day quota)
+    at the same file with YT_MCP_QUOTA_LEDGER to see their combined spend.
+    """
+
     def __init__(self) -> None:
         self.spent = 0
         self.calls = 0
@@ -89,6 +117,43 @@ class QuotaTracker:
     def add(self, cost: int) -> None:
         self.spent += cost
         self.calls += 1
+        self._record(cost)
+
+    @staticmethod
+    def _record(cost: int) -> None:
+        try:
+            import fcntl
+
+            path = ledger_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a+") as fh:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+                fh.seek(0)
+                raw = fh.read()
+                try:
+                    data = json.loads(raw) if raw.strip() else {}
+                except ValueError:
+                    data = {}
+                day = quota_day()
+                if data.get("day") != day:
+                    data = {"day": day, "units": 0, "calls": 0}
+                data["units"] = int(data.get("units", 0)) + cost
+                data["calls"] = int(data.get("calls", 0)) + 1
+                fh.seek(0)
+                fh.truncate()
+                fh.write(json.dumps(data))
+        except Exception:  # noqa: BLE001 - accounting must never fail a call
+            logger.exception("quota ledger update failed")
+
+    @staticmethod
+    def today() -> dict:
+        try:
+            data = json.loads(ledger_path().read_text())
+        except Exception:  # noqa: BLE001
+            return {"day": quota_day(), "units": 0, "calls": 0}
+        if data.get("day") != quota_day():
+            return {"day": quota_day(), "units": 0, "calls": 0}
+        return data
 
 
 class YT:
