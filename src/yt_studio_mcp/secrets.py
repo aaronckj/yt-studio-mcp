@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .paths import credentials_path
@@ -44,9 +44,21 @@ class FileStore(SecretStore):
     def set(self, key: str, value: str) -> None:
         data = self._load()
         data[key] = value
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=2))
-        self.path.chmod(0o600)
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Write a 0600 temp file and rename it into place: the old
+        # write_text()+chmod() left the token world-readable (umask 022) for a
+        # moment, and a crash mid-write truncated the only copy of the
+        # refresh token.
+        tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as fh:
+                fh.write(json.dumps(data, indent=2))
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self.path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
 
 class EnvStore(SecretStore):
@@ -79,6 +91,14 @@ class VaultproxyStore(SecretStore):
         try:
             with urlopen(req, timeout=10) as resp:
                 raw = resp.read()
+        except HTTPError as exc:
+            # HTTPError is a URLError subclass: a 404 for a missing item used
+            # to be reported as "vaultproxy unreachable".
+            if exc.code == 404 and method == "GET":
+                return {}
+            raise RuntimeError(
+                f"vaultproxy {method} {self.prefix}/{key} failed: HTTP {exc.code}"
+            ) from exc
         except URLError as exc:
             raise RuntimeError(
                 f"vaultproxy unreachable at {self.base_url}: {exc.reason}. "

@@ -39,6 +39,7 @@ def register(mcp) -> None:
             yt = get_yt()
             res = yt.call(yt.data.channels().list(part="snippet", mine=True), op="list")
             out["channel"] = res["items"][0]["snippet"]["title"]
+            out["channel_id"] = res["items"][0]["id"]
             out["status"] = "ok"
         except Exception as exc:  # noqa: BLE001 - health check reports, never raises
             out["status"] = f"error: {exc}"

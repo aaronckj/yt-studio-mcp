@@ -22,24 +22,65 @@ class AuthError(RuntimeError):
     pass
 
 
-def run_auth_flow(client_secret_path: str, store: SecretStore | None = None) -> str:
-    """Interactive browser consent. Stores refresh token + client info. Returns channel hint."""
-    from google_auth_oauthlib.flow import InstalledAppFlow
+def _channel_of(creds: Credentials) -> tuple[str, str]:
+    """(channel id, title) the freshly granted token acts as."""
+    from googleapiclient.discovery import build
+
+    svc = build("youtube", "v3", credentials=creds, cache_discovery=False)
+    items = svc.channels().list(part="snippet", mine=True).execute().get("items") or []
+    if not items:
+        raise AuthError("the authorized Google account has no YouTube channel")
+    return items[0]["id"], items[0]["snippet"]["title"]
+
+
+def run_auth_flow(
+    client_secret_path: str,
+    store: SecretStore | None = None,
+    *,
+    port: int = 0,
+    open_browser: bool = True,
+    timeout_seconds: int | None = None,
+    force: bool = False,
+    flow_factory=None,
+) -> str:
+    """Interactive browser consent. Stores refresh token + client info + the
+    channel it belongs to. Refuses to replace credentials of a DIFFERENT
+    channel (a re-auth without the right YT_MCP_CONFIG_DIR) unless force."""
+    from .paths import config_dir
 
     store = store or get_store()
-    path = Path(client_secret_path)
+    path = Path(client_secret_path).expanduser()
     if not path.exists():
         raise AuthError(f"client secret file not found: {path}")
-    flow = InstalledAppFlow.from_client_secrets_file(str(path), scopes=SCOPES)
-    creds = flow.run_local_server(port=0, prompt="consent")
+    if flow_factory is None:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+        flow_factory = InstalledAppFlow.from_client_secrets_file
+    flow = flow_factory(str(path), scopes=SCOPES)
+    kwargs: dict = {"port": port, "prompt": "consent", "open_browser": open_browser}
+    if timeout_seconds:
+        kwargs["timeout_seconds"] = timeout_seconds
+    creds = flow.run_local_server(**kwargs)
     if not creds.refresh_token:
         raise AuthError("no refresh token returned; remove prior grants and retry")
+    channel_id, title = _channel_of(creds)
+    previous = store.get("channel_id")
+    if previous and previous != channel_id and not force:
+        raise AuthError(
+            f"{config_dir()} holds credentials for channel {previous}, but you just "
+            f"authorized {title} ({channel_id}). Nothing was written. Point "
+            "YT_MCP_CONFIG_DIR at that channel's directory, or pass --force to replace."
+        )
     conf = json.loads(path.read_text())
     client = conf.get("installed") or conf.get("web") or {}
     store.set("refresh_token", creds.refresh_token)
     store.set("client_id", client.get("client_id", creds.client_id or ""))
     store.set("client_secret", client.get("client_secret", creds.client_secret or ""))
-    return "authorized; credentials stored"
+    store.set("channel_id", channel_id)
+    store.set("channel_title", title)
+    return (f"authorized as {title} ({channel_id}); credentials stored for "
+            f"{config_dir()}. Set YT_MCP_EXPECTED_CHANNEL_ID={channel_id} on this "
+            "instance to make it fail closed if the token ever changes channel.")
 
 
 def _refresh(creds: Credentials) -> None:

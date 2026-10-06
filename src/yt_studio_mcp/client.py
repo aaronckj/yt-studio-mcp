@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -44,6 +45,13 @@ HINTS = {
         "unschedule pass publish_at=''."
     ),
 }
+
+
+EXPECTED_CHANNEL_ENV = "YT_MCP_EXPECTED_CHANNEL_ID"
+
+
+class ChannelMismatch(RuntimeError):
+    pass
 
 
 class ApiError(RuntimeError):
@@ -98,10 +106,33 @@ class YT:
 
             from .auth import get_credentials
 
-            self._data = build(
+            service = build(
                 "youtube", "v3", credentials=get_credentials(), cache_discovery=False
             )
+            self.check_channel(service)
+            self._data = service
         return self._data
+
+    def check_channel(self, service: Any) -> None:
+        """Refuse to operate on the wrong channel.
+
+        Several instances (one per channel) share one OAuth client, and a
+        re-auth run without the right YT_MCP_CONFIG_DIR silently swaps which
+        channel a config dir's token belongs to. With YT_MCP_EXPECTED_CHANNEL_ID
+        set, the first API use verifies the token's channel (1 quota unit per
+        process) and every tool fails closed on a mismatch.
+        """
+        expected = os.environ.get(EXPECTED_CHANNEL_ENV, "").strip()
+        if not expected:
+            return
+        res = self.call(service.channels().list(part="id", mine=True), op="list")
+        actual = (res.get("items") or [{}])[0].get("id")
+        if actual != expected:
+            raise ChannelMismatch(
+                f"stored credentials belong to channel {actual!r}, but this instance "
+                f"expects {expected!r} ({EXPECTED_CHANNEL_ENV}). Refusing to act. "
+                "Re-run `yt-studio-mcp auth` with the right YT_MCP_CONFIG_DIR."
+            )
 
     @property
     def analytics(self) -> Any:

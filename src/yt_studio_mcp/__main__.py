@@ -30,6 +30,14 @@ def main() -> None:
         required=True,
         help="path to the OAuth client_secret.json downloaded from Google Cloud",
     )
+    auth_p.add_argument("--port", type=int, default=0,
+                        help="fixed local callback port (for an ssh -L tunnel); 0 = random")
+    auth_p.add_argument("--no-browser", action="store_true",
+                        help="print the consent URL instead of opening a browser")
+    auth_p.add_argument("--timeout", type=int, default=None,
+                        help="seconds to wait for the browser callback")
+    auth_p.add_argument("--force", action="store_true",
+                        help="replace credentials that belong to a different channel")
     tw_p = sub.add_parser("twitch-auth", help="one-time Twitch OAuth consent")
     tw_p.add_argument(
         "--client-id",
@@ -62,7 +70,16 @@ def main() -> None:
     if args.command == "auth":
         from .auth import run_auth_flow
 
-        print(run_auth_flow(args.client_secret), file=sys.stderr)
+        print(
+            run_auth_flow(
+                args.client_secret,
+                port=args.port,
+                open_browser=not args.no_browser,
+                timeout_seconds=args.timeout,
+                force=args.force,
+            ),
+            file=sys.stderr,
+        )
         return
 
     if args.command == "twitch-auth":
