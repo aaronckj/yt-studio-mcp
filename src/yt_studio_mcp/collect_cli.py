@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger("yt_studio_mcp")
@@ -31,61 +30,27 @@ def notify(msg: str) -> None:
         logger.error("ntfy failed: %s", exc)
 
 
-def run_collect(start: str, end: str, max_per_user: int, exclude: list[str]) -> int:
+def run_collect(start: str, end: str, max_per_user: int, exclude: list[str],
+                comment_limit: int | None = None) -> int:
     from .client import get_yt
-    from .paths import giveaway_dir
-    from .tools.giveaway import ALGO_VERSION, build_entries, canonical_hash
-
-    snapshot_dir = giveaway_dir()
+    from .tools.giveaway import COMMENTS_PER_VIDEO_DEFAULT, collect_raw, freeze_snapshot
 
     yt = get_yt()
-    me = yt.call(yt.data.channels().list(part="id,contentDetails", mine=True), op="list")[
-        "items"
-    ][0]
-    own_id = me["id"]
-    uploads = me["contentDetails"]["relatedPlaylists"]["uploads"]
-    video_items = yt.paginate(
-        yt.data.playlistItems(), "list", limit=500, part="snippet", playlistId=uploads
-    )
-    video_ids = [i["snippet"]["resourceId"]["videoId"] for i in video_items]
-
-    raw: list[dict] = []
-    for vid in video_ids:
-        threads = yt.paginate(
-            yt.data.commentThreads(), "list", limit=2000, part="snippet",
-            videoId=vid, order="time", textFormat="plainText",
-        )
-        for t in threads:
-            top = t["snippet"]["topLevelComment"]["snippet"]
-            raw.append({
-                "author_channel_id": top.get("authorChannelId", {}).get("value", ""),
-                "author": top.get("authorDisplayName", ""),
-                "video_id": vid,
-                "comment_id": t["snippet"]["topLevelComment"]["id"],
-                "published": top["publishedAt"],
-            })
-
-    entries = build_entries(raw, start, end, max_per_user, [own_id, *exclude])
-    digest = canonical_hash(entries)
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    snapshot_path = snapshot_dir / f"entries-{stamp}.json"
-    snapshot_path.write_text(json.dumps({
-        "algo": ALGO_VERSION, "window": {"start": start, "end": end},
-        "max_entries_per_user": max_per_user, "excluded": [own_id, *exclude],
-        "videos_scanned": len(video_ids), "comments_seen": len(raw),
-        "entry_hash": digest, "entries": entries,
-    }, indent=2))
-    participants = len({e["channel_id"] for e in entries})
-    summary = {
-        "snapshot_path": str(snapshot_path), "entry_hash": digest,
-        "entries": len(entries), "participants": participants,
-        "videos_scanned": len(video_ids), "quota_spent": yt.quota.spent,
-    }
+    collected = collect_raw(yt, comment_limit or COMMENTS_PER_VIDEO_DEFAULT)
+    summary = freeze_snapshot(collected, start, end, max_per_user, exclude)
+    summary["quota_spent"] = yt.quota.spent
     print(json.dumps(summary, indent=2))
+    if not summary["complete"]:
+        notify(
+            f"⚠️ Giveaway entries frozen INCOMPLETE: {len(summary['truncated_videos'])} "
+            f"video(s) hit the comment limit. Re-collect with a higher --comment-limit "
+            f"before drawing.\n{summary['snapshot_path']}"
+        )
+        return 3
     notify(
-        f"Giveaway entries frozen: {len(entries)} entries from {participants} "
-        f"participants. Hash {digest[:12]}. Ready to draw:\n{snapshot_path}"
+        f"Giveaway entries frozen: {summary['entries']} entries from "
+        f"{summary['participants']} participants. Hash {summary['entry_hash'][:12]}. "
+        f"Ready to draw:\n{summary['snapshot_path']}"
     )
     return 0
 
@@ -98,10 +63,13 @@ def main(argv: list[str]) -> int:
     p.add_argument("--end", required=True, help="RFC3339 window end")
     p.add_argument("--max", type=int, default=5, dest="max_per_user")
     p.add_argument("--exclude", default="", help="comma-separated channel ids")
+    p.add_argument("--comment-limit", type=int, default=None,
+                   help="max top-level comments read per video (exit 3 if any video "
+                   "has more: the snapshot is incomplete)")
     a = p.parse_args(argv)
     exclude = [x.strip() for x in a.exclude.split(",") if x.strip()]
     try:
-        return run_collect(a.start, a.end, a.max_per_user, exclude)
+        return run_collect(a.start, a.end, a.max_per_user, exclude, a.comment_limit)
     except Exception as exc:  # noqa: BLE001
         logger.error("collect failed: %s", exc)
         print(json.dumps({"error": str(exc)}), file=sys.stderr)

@@ -143,20 +143,40 @@ class YT:
         logger.info("api op=%s cost=%s (resumable)", op, cost)
         return response
 
-    def paginate(self, resource: Any, op: str, limit: int, **params) -> list[dict]:
+    def paginate(
+        self, resource: Any, op: str, limit: int, page_size: int = 50, **params
+    ) -> list[dict]:
         """Collect up to `limit` items across pages of a .list endpoint."""
+        return self.paginate_more(resource, op, limit, page_size=page_size, **params)[0]
+
+    def paginate_more(
+        self, resource: Any, op: str, limit: int, page_size: int = 50, **params
+    ) -> tuple[list[dict], bool]:
+        """Like paginate(), but also say whether items were LEFT BEHIND.
+
+        Callers that must be complete (giveaway entries, moderation sweeps)
+        need to know the difference between "that was everything" and "the
+        limit cut it off" -- silently dropping the tail looks identical.
+        """
         items: list[dict] = []
         token = None
+        more = False
         while len(items) < limit:
             page = self.call(
-                resource.list(**params, maxResults=min(50, limit - len(items)), pageToken=token),
+                resource.list(
+                    **params, maxResults=min(page_size, limit - len(items)), pageToken=token
+                ),
                 op=op,
             )
             items.extend(page.get("items", []))
             token = page.get("nextPageToken")
             if not token:
                 break
-        return items[:limit]
+        else:
+            more = bool(token)
+        if len(items) > limit:
+            more = True
+        return items[:limit], more
 
 
 def preview(action: str, would: dict) -> dict:
