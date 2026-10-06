@@ -5,7 +5,9 @@
 Tier 1: banned-word match (deterministic) → auto_action applies.
 Tier 2 (--llm, only if YT_MCP_LLM_URL/MODEL set): every remaining NEW comment
 is classified by the LLM; spam verdicts get auto_action too, tagged with the
-model's reason. Exit code: 0 = clean, 2 = matches found (cron-friendly).
+model's reason. Exit code: 0 = clean, 2 = matches found, 4 = incomplete
+(moderation failed or the limit cut the scan short; watermark held back on
+moderation failure), 1 = error.
 Optional ntfy push: set YT_MCP_NTFY_URL to get a phone ping on matches.
 """
 
@@ -39,7 +41,13 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
     from .client import get_yt
     from .llm import classify_comment, llm_configured
     from .paths import scan_state_path
-    from .tools.banned_words import _load_words, match_comment
+    from .tools.banned_words import (
+        _load_words,
+        apply_moderation,
+        match_comment,
+        truncation_gap,
+        write_watermark,
+    )
 
     state_path = scan_state_path()
 
@@ -51,10 +59,11 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
 
     me = yt.call(yt.data.channels().list(part="id", mine=True), op="list")
     channel_id = me["items"][0]["id"]  # own comments are exempt below
-    threads = yt.paginate(
+    threads, more = yt.paginate_more(
         yt.data.commentThreads(),
         "list",
         limit=limit,
+        page_size=100,
         part="snippet",
         allThreadsRelatedToChannelId=channel_id,
         order="time",
@@ -92,18 +101,12 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
             if verdict.get("spam"):
                 matches.append({**entry, "source": "llm", "reason": verdict["reason"]})
 
-    if auto_action != "none":
-        for m in matches:
-            yt.call(
-                yt.data.comments().setModerationStatus(
-                    id=m["comment_id"], moderationStatus=auto_action
-                ),
-                op="setModerationStatus",
-            )
+    failed: list[dict] = []
+    if auto_action != "none" and matches:
+        _, failed = apply_moderation(yt, matches, auto_action)
 
-    if incremental and newest:
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state_path.write_text(json.dumps({"last_scan": newest}))
+    if incremental and newest and not failed:
+        write_watermark(newest)
 
     report = {
         "checked_new": checked,
@@ -111,9 +114,17 @@ def run_scan(incremental: bool, auto_action: str, use_llm: bool, limit: int) -> 
         "action": auto_action,
         "quota_spent": yt.quota.spent,
     }
+    if failed:
+        report["moderation_failed"] = failed
+    gap = truncation_gap(threads, more, watermark)
+    if gap:
+        report["truncated"] = gap
     _append_history(report)
     print(json.dumps(report, indent=2))
     notify(matches)
+    if failed or gap:
+        logger.error("scan incomplete: failed=%d truncated=%s", len(failed), bool(gap))
+        return 4
     return 2 if matches else 0
 
 

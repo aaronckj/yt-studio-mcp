@@ -32,6 +32,16 @@ Comment text:
 Answer with ONLY a JSON object: {{"spam": true/false, "reason": "<max 10 words>"}}"""
 
 
+def _strict_bool(value) -> bool:
+    """Only an explicit true is spam. bool("false") is True in Python, so a
+    model answering with a quoted string used to hold every comment."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
 def llm_configured() -> bool:
     return bool(os.environ.get("YT_MCP_LLM_URL") and os.environ.get("YT_MCP_LLM_MODEL"))
 
@@ -65,7 +75,8 @@ def classify_comment(author: str, text: str, timeout: int = 30) -> dict:
         start = content.find("{")
         end = content.rfind("}")
         verdict = json.loads(content[start : end + 1])
-        return {"spam": bool(verdict.get("spam")), "reason": str(verdict.get("reason", ""))}
+        return {"spam": _strict_bool(verdict.get("spam")),
+                "reason": str(verdict.get("reason", ""))}
     except (KeyError, IndexError, ValueError) as exc:
         logger.error("llm response unparseable: %s payload=%r", exc, payload)
         return {"error": f"llm response unparseable: {exc}"}

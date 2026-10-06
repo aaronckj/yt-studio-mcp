@@ -81,6 +81,57 @@ def match_comment(text: str, words: list[str]) -> list[str]:
     return hits
 
 
+def truncation_gap(threads: list[dict], more: bool, watermark: str | None) -> dict | None:
+    """When the fetch limit cut the listing off, describe what was never read.
+
+    order=time lists newest first, so a cut-off means the OLDEST new comments
+    were skipped; with an incremental watermark they would be skipped forever.
+    """
+    if not more or not threads:
+        return None
+    oldest = min(
+        t["snippet"]["topLevelComment"]["snippet"].get("publishedAt", "") for t in threads
+    )
+    if watermark and oldest <= watermark:
+        return None  # the window back to the watermark was fully covered
+    return {
+        "warning": "comment limit reached before the previous scan point; older "
+        "comments in this range were NOT scanned",
+        "unscanned_after": watermark,
+        "unscanned_before": oldest,
+    }
+
+
+def apply_moderation(yt, matches: list[dict], action: str) -> tuple[list[str], list[dict]]:
+    """Moderate each match independently; one failure must not hide the rest."""
+    applied, failed = [], []
+    for m in matches:
+        try:
+            yt.call(
+                yt.data.comments().setModerationStatus(
+                    id=m["comment_id"], moderationStatus=action
+                ),
+                op="setModerationStatus",
+            )
+            applied.append(m["comment_id"])
+        except Exception as exc:  # noqa: BLE001 - reported per comment
+            failed.append({"comment_id": m["comment_id"], "error": str(exc)})
+            if getattr(exc, "reason", "") == "quotaExceeded":
+                failed.extend(
+                    {"comment_id": r["comment_id"], "error": "skipped: quota exhausted"}
+                    for r in matches[len(applied) + len(failed):]
+                )
+                break
+    return applied, failed
+
+
+def write_watermark(value: str) -> None:
+    scan_state_path().parent.mkdir(parents=True, exist_ok=True)
+    tmp = scan_state_path().with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"last_scan": value}))
+    tmp.replace(scan_state_path())
+
+
 def register(mcp) -> None:
     @mcp.tool()
     def banned_words_list() -> dict:
@@ -131,7 +182,9 @@ def register(mcp) -> None:
             params["videoId"] = video_id
         else:
             params["allThreadsRelatedToChannelId"] = own_channel_id
-        threads = yt.paginate(yt.data.commentThreads(), "list", limit=limit, **params)
+        threads, more = yt.paginate_more(
+            yt.data.commentThreads(), "list", limit=limit, page_size=100, **params
+        )
 
         matches = []
         newest_seen = watermark
@@ -163,12 +216,9 @@ def register(mcp) -> None:
             "matches": matches,
             "words_checked": len(words),
         }
-        if incremental:
-            result["watermark_was"] = watermark
-            if newest_seen and not dry_run:
-                scan_state_path().parent.mkdir(parents=True, exist_ok=True)
-                scan_state_path().write_text(json.dumps({"last_scan": newest_seen}))
-                result["watermark_now"] = newest_seen
+        gap = truncation_gap(threads, more, watermark)
+        if gap:
+            result["truncated"] = gap
         if auto_action != "none" and matches:
             if dry_run:
                 result["moderation"] = preview(
@@ -176,15 +226,18 @@ def register(mcp) -> None:
                     {"action": auto_action, "comment_ids": [m["comment_id"] for m in matches]},
                 )
             else:
-                for m in matches:
-                    yt.call(
-                        yt.data.comments().setModerationStatus(
-                            id=m["comment_id"], moderationStatus=auto_action
-                        ),
-                        op="setModerationStatus",
-                    )
+                applied, failed = apply_moderation(yt, matches, auto_action)
                 result["moderation"] = {
                     "action": auto_action,
-                    "applied_to": len(matches),
+                    "applied_to": len(applied),
+                    "failed": failed,
                 }
+        if incremental:
+            result["watermark_was"] = watermark
+            # Advance only once moderation went through: a quota error halfway
+            # used to leave the watermark past comments that were never held.
+            failed_any = bool(result.get("moderation", {}).get("failed"))
+            if newest_seen and not dry_run and not failed_any:
+                write_watermark(newest_seen)
+                result["watermark_now"] = newest_seen
         return result

@@ -121,9 +121,9 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
                 cid = t["snippet"]["topLevelComment"]["id"]
                 if cid in seen_comments:
                     continue
-                seen_comments.add(cid)
                 top = t["snippet"]["topLevelComment"]["snippet"]
                 if top.get("authorChannelId", {}).get("value") == own:
+                    seen_comments.add(cid)
                     continue
                 src = is_spam(top.get("authorDisplayName", ""),
                               top.get("textOriginal", top.get("textDisplay", "")))
@@ -136,6 +136,11 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
                                "text": top.get("textOriginal", top.get("textDisplay", ""))[:200],
                                "source": f"live-comment/{src}", "matched": []})
                     notify(f"held comment ({src}): {top.get('authorDisplayName')}")
+                elif src:
+                    logger.info("would hold comment %s (%s) -- auto-action none", cid, src)
+                # Marked seen only after it was handled, so a failed moderation
+                # call is retried next cycle instead of being forgotten.
+                seen_comments.add(cid)
         except Exception as exc:  # noqa: BLE001 - comments may be disabled on live
             logger.error("comment poll: %s", exc)
         # 2) live chat
@@ -153,6 +158,11 @@ def run_watch(interval: int, auto_action: str, use_llm: bool) -> int:
                         continue
                     text = m["snippet"].get("displayMessage", "")
                     csrc = is_spam(ad["displayName"], text)
+                    if csrc and auto_action == "none":
+                        # Observe-only mode must never delete anything.
+                        logger.info("would delete chat %s (%s) -- auto-action none",
+                                    m["id"], csrc)
+                        continue
                     if csrc:
                         yt.call(yt.data.liveChatMessages().delete(id=m["id"]), op="delete")
                         held += 1
