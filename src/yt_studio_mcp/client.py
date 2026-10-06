@@ -38,6 +38,11 @@ HINTS = {
     "notFound": "The referenced resource id does not exist or is not visible to this channel.",
     "authError": "Re-run `yt-studio-mcp auth`.",
     "commentsDisabled": "Comments are disabled on that video.",
+    "invalidPublishAt": (
+        "The schedule time is invalid or already past. To publish now pass "
+        "privacy='public' (the stale schedule is cleared automatically); to "
+        "unschedule pass publish_at=''."
+    ),
 }
 
 
@@ -47,6 +52,25 @@ class ApiError(RuntimeError):
         self.status = status
         self.hint = HINTS.get(reason, "")
         super().__init__(f"{reason} (HTTP {status}): {detail} {self.hint}".strip())
+
+
+def op_cost(op: str) -> int:
+    return COSTS.get(op, COSTS.get(op.split(".")[-1], 1))
+
+
+def map_http_error(exc: HttpError, op: str) -> ApiError:
+    reason = "unknown"
+    detail = str(exc)
+    try:
+        body = json.loads(exc.content.decode())
+        err = body.get("error", {})
+        detail = err.get("message", detail)
+        errors = err.get("errors") or [{}]
+        reason = errors[0].get("reason", err.get("status", "unknown"))
+    except Exception:  # noqa: BLE001 - best-effort body parse
+        pass
+    logger.error("api op=%s failed reason=%s detail=%s", op, reason, detail)
+    return ApiError(reason, exc.resp.status if exc.resp else 0, detail)
 
 
 class QuotaTracker:
@@ -93,7 +117,7 @@ class YT:
 
     def call(self, request: Any, op: str = "list") -> dict:
         """Execute a prepared API request with quota accounting and error mapping."""
-        cost = COSTS.get(op, COSTS.get(op.split(".")[-1], 1))
+        cost = op_cost(op)
         started = time.monotonic()
         try:
             result = request.execute()
@@ -101,19 +125,23 @@ class YT:
             logger.info("api op=%s cost=%s ms=%d", op, cost, (time.monotonic() - started) * 1000)
             return result if result is not None else {}
         except HttpError as exc:
+            # A rejected call still burns its quota cost.
             self.quota.add(cost)
-            reason = "unknown"
-            detail = str(exc)
-            try:
-                body = json.loads(exc.content.decode())
-                err = body.get("error", {})
-                detail = err.get("message", detail)
-                errors = err.get("errors") or [{}]
-                reason = errors[0].get("reason", err.get("status", "unknown"))
-            except Exception:  # noqa: BLE001 - best-effort body parse
-                pass
-            logger.error("api op=%s failed reason=%s detail=%s", op, reason, detail)
-            raise ApiError(reason, exc.resp.status if exc.resp else 0, detail) from exc
+            raise map_http_error(exc, op) from exc
+
+    def upload(self, request: Any, op: str = "videos.insert") -> dict:
+        """Drive a resumable upload to completion with the same accounting as call()."""
+        cost = op_cost(op)
+        try:
+            response = None
+            while response is None:
+                _, response = request.next_chunk()
+        except HttpError as exc:
+            self.quota.add(cost)
+            raise map_http_error(exc, op) from exc
+        self.quota.add(cost)
+        logger.info("api op=%s cost=%s (resumable)", op, cost)
+        return response
 
     def paginate(self, resource: Any, op: str, limit: int, **params) -> list[dict]:
         """Collect up to `limit` items across pages of a .list endpoint."""

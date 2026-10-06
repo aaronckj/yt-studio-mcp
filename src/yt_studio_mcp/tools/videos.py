@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..client import get_yt, preview
+from ..validate import check_future_schedule, check_privacy, is_past
+
+THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024
+THUMBNAIL_SUFFIXES = (".jpg", ".jpeg", ".png")
+
+
+def check_thumbnail_file(image_path: str) -> str | None:
+    """Reject anything YouTube would refuse (or that is not a thumbnail at all)
+    before spending 50 quota units -- and before an arbitrary local file can
+    be published as a channel image."""
+    p = Path(image_path).expanduser()
+    if p.suffix.lower() not in THUMBNAIL_SUFFIXES:
+        return f"thumbnail must be .jpg/.jpeg/.png (got {p.suffix or 'no extension'})"
+    if not p.is_file():
+        return f"no such file: {image_path}"
+    size = p.stat().st_size
+    if size > THUMBNAIL_MAX_BYTES:
+        return f"thumbnail is {size} bytes; YouTube's limit is {THUMBNAIL_MAX_BYTES}"
+    return None
 
 
 def _video_summary(item: dict) -> dict:
@@ -167,18 +188,42 @@ def register(mcp) -> None:
     ) -> dict:
         """Update video metadata. Only supplied fields change; others are preserved.
 
-        publish_at (RFC3339, e.g. 2026-08-07T17:00:00Z) reschedules a video.
-        YouTube only honours it while privacyStatus is private, so this forces
-        private unless an explicit privacy is passed. Pass publish_at="" to
-        clear the schedule and leave the video private indefinitely.
+        privacy: private|unlisted|public. publish_at (RFC3339 WITH an offset,
+        e.g. 2026-08-07T17:00:00Z, must be in the future) reschedules a video
+        and keeps it private until then; combining it with privacy=public or
+        unlisted is refused rather than guessed at. Pass publish_at="" to clear
+        the schedule and leave the video private.
+
+        Publishing now: privacy="public" alone is enough -- any existing
+        schedule (including a stale, already-past one that YouTube failed to
+        fire) is cleared in the same update, because YouTube rejects a
+        non-private video that still carries publishAt.
         """
+        if privacy is not None and (err := check_privacy(privacy)):
+            return {"error": err}
+        if publish_at:
+            if privacy is not None and privacy != "private":
+                return {
+                    "error": f"publish_at schedules a PRIVATE video to go public later; "
+                    f"it cannot be combined with privacy={privacy!r}. Pass one or "
+                    "the other."
+                }
+            if err := check_future_schedule(publish_at):
+                return {"error": err}
         yt = get_yt()
-        current = yt.call(
+        items = yt.call(
             yt.data.videos().list(part="snippet,status", id=video_id), op="list"
-        )["items"][0]
+        ).get("items", [])
+        if not items:
+            return {"error": f"video not found: {video_id}"}
+        current = items[0]
         snippet = current["snippet"]
         status = current["status"]
-        changes = {}
+        before = {
+            "privacy": status.get("privacyStatus"),
+            "publish_at": status.get("publishAt"),
+        }
+        changes: dict = {}
         if title is not None:
             snippet["title"] = title
             changes["title"] = title
@@ -194,6 +239,11 @@ def register(mcp) -> None:
         if privacy is not None:
             status["privacyStatus"] = privacy
             changes["privacy"] = privacy
+            if privacy != "private" and status.pop("publishAt", None):
+                # Re-sending the old publishAt with a non-private status is
+                # rejected (invalidPublishAt) -- the reason "publish now" on a
+                # missed schedule used to fail.
+                changes["publish_at"] = f"cleared (privacy={privacy})"
         if publish_at is not None:
             if publish_at == "":
                 status.pop("publishAt", None)
@@ -201,19 +251,43 @@ def register(mcp) -> None:
             else:
                 status["publishAt"] = publish_at
                 changes["publish_at"] = publish_at
-                # A scheduled video must be private, or YouTube drops the time.
                 if status.get("privacyStatus") != "private":
                     status["privacyStatus"] = "private"
-                    changes["privacy"] = "private (forced by publish_at)"
+                    changes["privacy"] = "private (required by publish_at)"
+        if not changes:
+            return {"error": "nothing to update"}
+        if (
+            publish_at is None
+            and status.get("privacyStatus") == "private"
+            and is_past(status.get("publishAt"))
+        ):
+            return {
+                "error": f"video {video_id} carries a schedule that is already past "
+                f"({status['publishAt']}) -- YouTube did not fire it and will reject "
+                "any update that re-sends it. Decide explicitly: privacy='public' "
+                "to publish now, publish_at=<future time> to reschedule, or "
+                "publish_at='' to unschedule.",
+                "before": before,
+            }
+        goes_public = (
+            status.get("privacyStatus") == "public" and before["privacy"] != "public"
+        )
         if dry_run:
-            return preview("update_video", {"video_id": video_id, **changes})
+            return preview(
+                "update_video",
+                {"video_id": video_id, "before": before, "goes_public_now": goes_public,
+                 **changes},
+            )
         body = {"id": video_id, "snippet": snippet, "status": status}
         yt.call(yt.data.videos().update(part="snippet,status", body=body), op="update")
-        return {"updated": video_id, "changes": changes}
+        return {"updated": video_id, "before": before, "goes_public_now": goes_public,
+                "changes": changes}
 
     @mcp.tool()
     def set_thumbnail(video_id: str, image_path: str, dry_run: bool = False) -> dict:
-        """Set a custom thumbnail from a local image file (JPG/PNG, <2MB)."""
+        """Set a custom thumbnail from a local image file (JPG/PNG, <=2MB)."""
+        if err := check_thumbnail_file(image_path):
+            return {"error": err}
         if dry_run:
             return preview("set_thumbnail", {"video_id": video_id, "image_path": image_path})
         from googleapiclient.http import MediaFileUpload
@@ -248,7 +322,18 @@ def register(mcp) -> None:
         dry_run: bool = False,
     ) -> dict:
         """Upload a video (resumable). privacy: private|unlisted|public. publish_at
-        (RFC3339) schedules publication and requires privacy=private."""
+        (RFC3339 with offset, in the future) schedules publication and requires
+        privacy=private -- anything else is refused, never uploaded public."""
+        if err := check_privacy(privacy):
+            return {"error": err}
+        if publish_at:
+            if privacy != "private":
+                return {"error": "publish_at requires privacy='private' (the video goes "
+                        "public at publish_at); refusing to upload it as " + privacy}
+            if err := check_future_schedule(publish_at):
+                return {"error": err}
+        if not Path(file_path).expanduser().is_file():
+            return {"error": f"no such file: {file_path}"}
         if dry_run:
             return preview(
                 "upload_video",
@@ -265,13 +350,13 @@ def register(mcp) -> None:
             "snippet": {"title": title, "description": description, "tags": tags or []},
             "status": status,
         }
-        media = MediaFileUpload(file_path, chunksize=8 * 1024 * 1024, resumable=True)
+        media = MediaFileUpload(
+            str(Path(file_path).expanduser()), chunksize=8 * 1024 * 1024, resumable=True
+        )
         request = yt.data.videos().insert(part="snippet,status", body=body, media_body=media)
-        response = None
-        while response is None:
-            _, response = request.next_chunk()
-        yt.quota.add(1600)
-        return {"uploaded": response["id"], "title": title, "privacy": privacy}
+        response = yt.upload(request, op="videos.insert")
+        return {"uploaded": response["id"], "title": title, "privacy": privacy,
+                "publish_at": publish_at}
 
     @mcp.tool()
     def delete_video(video_id: str, dry_run: bool = False) -> dict:
