@@ -100,18 +100,26 @@ capped per person; winners drawn at random.*
 1. collect_entries(start="2026-01-01T00:00:00Z", end="2026-01-31T23:59:59Z",
                    max_entries_per_user=5, exclude_channel_ids=[...])
      → walks every upload's comments, derives entries, writes a snapshot
-       file and returns its SHA-256 entry hash. Announce the hash if you
-       want third-party verifiability.
+       file and returns its SHA-256 entry hash. Announce the hash BEFORE the
+       seed exists if you want third-party verifiability. Timestamps need an
+       offset (Z or -05:00). If any video had more comments than
+       comment_limit_per_video the snapshot is marked incomplete and cannot
+       be drawn without allow_incomplete=True; videos with comments disabled
+       are skipped and listed.
 
 2. draw_winners(snapshot_path, n=5, seed="any-public-string")
-     → deterministic: a seeded shuffle over the canonically sorted entries,
-       first n distinct channels win. Anyone with the snapshot + seed can
-       re-run the draw and get identical winners. Records an audit file.
-       Screen-record this step for extra transparency.
+     → deterministic (algo v2): each entry is ranked by
+       sha256("v2|seed|entry_hash|channel_id|video_id|comment_id"); the n
+       lowest-ranked distinct channels win. Anyone with the snapshot + seed
+       can recompute it with any sha256 tool. Every draw is appended to a
+       hash-chained <snapshot>-draws.jsonl; drawing again with a different
+       seed requires a recorded redraw_reason. Use a seed nobody controls
+       (e.g. a randomness-beacon round announced in advance).
 
 3. make_verification_code(audit_path, winner_channel_id)
      → short code you send to the claimed winner over your announced contact
-       channel.
+       channel. Audit files are re-derived from the snapshot before use, so
+       an edited winner list is rejected.
 
 4. check_verification_reply(audit_path, comment_id, winner_channel_id)
      → confirms the reply was authored by the winning channel and contains
@@ -137,6 +145,8 @@ per channel**, each with its own state directory:
 | `YT_MCP_CONFIG_DIR` | `~/.config/yt-studio-mcp` | credentials (file backend), banned words + scan watermark, scan history, live status, giveaway snapshots, question-comment tracking, archived thumbnails |
 | `YT_MCP_CREDENTIALS_FILE` | `<config dir>/credentials.json` | the file-backend credentials only |
 | `YT_MCP_VAULTPROXY_PREFIX` | `yt-studio-mcp` | vault item namespace (vaultproxy backend only) |
+| `YT_MCP_EXPECTED_CHANNEL_ID` | unset | when set, the first API use verifies the stored token belongs to this channel and every tool refuses to act otherwise (recommended whenever several instances share one OAuth client) |
+| `YT_MCP_QUOTA_LEDGER` | `<config dir>/quota_ledger.json` | per-day quota ledger; point instances that share one Google Cloud project at the same file |
 
 Nothing is shared between directories, so instances never see each other's
 tokens, wordlists or giveaway files. Leaving the variables unset keeps the
@@ -153,8 +163,20 @@ claude mcp add yt-second -s user -e YT_MCP_CONFIG_DIR=$HOME/.config/yt-studio-mc
 ```
 
 The same Google OAuth client can authorize any number of channels; in the
-consent screen pick the channel (Brand Accounts are listed separately). The
+consent screen pick the channel (Brand Accounts are listed separately). `auth`
+records which channel it authorized and refuses to replace another channel's
+credentials in the same directory unless `--force` is given. For a headless box,
+`auth --port 59067 --no-browser --timeout 1200` and an `ssh -L` tunnel to that port. The
 headless `scan`, `collect` and `watch` commands honour the same variable.
+
+## Headless spam scan
+
+`yt-studio-mcp scan --incremental --auto-action heldForReview [--llm]` fails
+closed: a missing, empty or corrupt word list or watermark is an error, and the
+watermark advances only when every new comment was read, classified and
+moderated. Exit codes: 0 clean, 2 matches, 4 incomplete (moderation or LLM
+failure, or the limit cut the listing short; watermark held), 5 another scan
+holds the lock, 1 error. `watch --auto-action none` observes only.
 
 ## Secret storage
 
@@ -167,8 +189,9 @@ headless `scan`, `collect` and `watch` commands honour the same variable.
 ## Quota
 
 The Data API's default allocation is 10,000 units/day. Most reads cost 1
-unit; writes cost ~50; a video upload costs 1,600. `quota_status()` shows a
-session estimate and warns at 80%. `collect_entries` reports what it spent.
+unit; writes cost ~50; a video upload costs 1,600. `quota_status()` shows the
+session spend and today's spend from a persistent ledger keyed on the Pacific
+day (when the quota resets) and warns at 80%. `collect_entries` reports what it spent.
 
 ## Development
 
