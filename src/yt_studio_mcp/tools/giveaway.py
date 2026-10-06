@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from random import Random
 
-from ..client import get_yt, preview
+from ..client import ApiError, get_yt, preview
 from ..paths import giveaway_dir
 from ..validate import parse_rfc3339
 
@@ -139,6 +139,7 @@ def canonical_hash(entries: list[dict]) -> str:
 META_FIELDS = (
     "algo", "window", "max_entries_per_user", "excluded", "videos_scanned",
     "comments_seen", "complete", "truncated_videos", "uploads_truncated",
+    "comments_disabled_videos",
 )
 
 
@@ -217,17 +218,27 @@ def collect_raw(yt, comment_limit_per_video: int = COMMENTS_PER_VIDEO_DEFAULT) -
     video_ids = [i["snippet"]["resourceId"]["videoId"] for i in video_items]
     raw: list[dict] = []
     truncated: list[str] = []
+    disabled: list[str] = []
     for vid in video_ids:
-        threads, more = yt.paginate_more(
-            yt.data.commentThreads(),
-            "list",
-            limit=comment_limit_per_video,
-            page_size=100,
-            part="snippet",
-            videoId=vid,
-            order="time",
-            textFormat="plainText",
-        )
+        try:
+            threads, more = yt.paginate_more(
+                yt.data.commentThreads(),
+                "list",
+                limit=comment_limit_per_video,
+                page_size=100,
+                part="snippet",
+                videoId=vid,
+                order="time",
+                textFormat="plainText",
+            )
+        except ApiError as exc:
+            # One video with comments turned off (e.g. made-for-kids, or a
+            # live VOD) aborted the WHOLE collection at the giveaway close.
+            # It has no entries to collect; record it and carry on.
+            if exc.reason == "commentsDisabled":
+                disabled.append(vid)
+                continue
+            raise
         if more:
             truncated.append(vid)
         for t in threads:
@@ -242,7 +253,8 @@ def collect_raw(yt, comment_limit_per_video: int = COMMENTS_PER_VIDEO_DEFAULT) -
                 }
             )
     return {"own_id": own_id, "video_ids": video_ids, "raw": raw,
-            "truncated_videos": truncated, "uploads_truncated": uploads_truncated}
+            "truncated_videos": truncated, "uploads_truncated": uploads_truncated,
+            "comments_disabled_videos": disabled}
 
 
 def freeze_snapshot(
@@ -263,6 +275,7 @@ def freeze_snapshot(
         "complete": not (collected["truncated_videos"] or collected["uploads_truncated"]),
         "truncated_videos": collected["truncated_videos"],
         "uploads_truncated": collected["uploads_truncated"],
+        "comments_disabled_videos": collected.get("comments_disabled_videos", []),
         "collected_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "entry_hash": digest,
         "entries": entries,
@@ -290,6 +303,7 @@ def freeze_snapshot(
         "complete": snap["complete"],
         "truncated_videos": collected["truncated_videos"],
         "uploads_truncated": collected["uploads_truncated"],
+        "comments_disabled_videos": collected.get("comments_disabled_videos", []),
     }
 
 

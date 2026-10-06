@@ -194,6 +194,19 @@ class _Data:
         return _Pages([{"items": [{"snippet": {"resourceId": {"videoId": "v1"}}}]}])
 
     def commentThreads(self):  # noqa: N802
+        if getattr(self, "disabled", False):
+            from googleapiclient.errors import HttpError
+
+            class R:
+                status = 403
+                reason = "x"
+            body = json.dumps({"error": {"errors": [{"reason": "commentsDisabled"}]}})
+
+            class Bad:
+                def list(self, **kw):
+                    return Req(error=HttpError(R(), body.encode()))
+            return Bad()
+
         def thread(i):
             return {"snippet": {"topLevelComment": {"id": f"c{i}", "snippet": {
                 "authorChannelId": {"value": f"u{i}"}, "authorDisplayName": f"u{i}",
@@ -206,3 +219,11 @@ def test_collection_reports_truncation_instead_of_dropping_silently():
     out = collect_raw(yt, comment_limit_per_video=3)
     assert out["truncated_videos"] == ["v1"]
     assert client  # module imported for monkeypatch symmetry
+
+
+def test_comments_disabled_video_does_not_abort_collection():
+    """2026-09-01: the giveaway close collection died on one such video."""
+    data = _Data(n_comments=2)
+    data.disabled = True
+    out = collect_raw(YT(data_service=data))
+    assert out["comments_disabled_videos"] == ["v1"] and out["truncated_videos"] == []
