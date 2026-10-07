@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt
 
 
@@ -13,7 +15,7 @@ def _rows_to_dicts(res: dict) -> list[dict]:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def channel_report(
         start: str,
         end: str,
@@ -35,7 +37,7 @@ def register(mcp) -> None:
         )
         return _rows_to_dicts(res)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def video_report(
         video_id: str,
         start: str,
@@ -62,7 +64,7 @@ def register(mcp) -> None:
         )
         return _rows_to_dicts(res)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def top_videos(start: str, end: str, limit: int = 10) -> list[dict]:
         """Top videos by views between start/end (YYYY-MM-DD)."""
         yt = get_yt()

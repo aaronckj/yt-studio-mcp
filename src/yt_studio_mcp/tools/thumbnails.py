@@ -20,6 +20,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from mcp.types import ToolAnnotations
+
 from ..client import preview
 from ..paths import thumbnails_dir
 
@@ -196,7 +198,7 @@ def generate_image_with_refs(prompt: str, quality: str, references: list[str]) -
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def generate_thumbnail(
         prompt: str,
         video_id: str | None = None,

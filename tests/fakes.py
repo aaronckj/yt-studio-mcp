@@ -62,10 +62,12 @@ class ToolCapture:
 
     def __init__(self):
         self.fns = {}
+        self.annotations = {}
 
-    def tool(self):
+    def tool(self, annotations=None, **_kw):
         def deco(fn):
             self.fns[fn.__name__] = fn
+            self.annotations[fn.__name__] = annotations
             return fn
 
         return deco

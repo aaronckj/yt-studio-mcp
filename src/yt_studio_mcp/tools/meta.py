@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt
 
 DAILY_QUOTA_DEFAULT = 10_000
@@ -9,7 +11,7 @@ WARN_FRACTION = 0.8
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def quota_status() -> dict:
         """Quota units spent this session and today (Pacific day, persisted
         across restarts; local estimate from the official cost table)."""
@@ -30,7 +32,7 @@ def register(mcp) -> None:
                     "Authoritative usage is in the Google Cloud console.",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def health_check() -> dict:
         """Verify stored credentials refresh and the channel is reachable."""
         from ..auth import AuthError, get_credentials

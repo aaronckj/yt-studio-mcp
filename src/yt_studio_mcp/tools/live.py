@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 from ..validate import check_future_schedule, check_privacy
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_broadcasts(status: str = "all", limit: int = 25) -> list[dict]:
         """List live broadcasts. status: all|active|upcoming|completed."""
         yt = get_yt()
@@ -31,7 +33,7 @@ def register(mcp) -> None:
             for b in items
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def create_broadcast(
         title: str,
         start_time: str,
@@ -97,7 +99,7 @@ def register(mcp) -> None:
                 out["twitch"] = {"error": str(exc)}
         return out
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_streams(limit: int = 10) -> list[dict]:
         """List reusable stream keys and their health."""
         yt = get_yt()
@@ -115,7 +117,7 @@ def register(mcp) -> None:
             for s in items
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def bind_broadcast(broadcast_id: str, stream_id: str, dry_run: bool = False) -> dict:
         """Bind a broadcast to a stream key."""
         if dry_run:
@@ -129,7 +131,7 @@ def register(mcp) -> None:
         )
         return {"bound": broadcast_id, "stream": stream_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def live_chat_messages(chat_id: str, limit: int = 200) -> list[dict]:
         """Read messages from a live chat (chat_id from list_broadcasts)."""
         yt = get_yt()
@@ -151,7 +153,7 @@ def register(mcp) -> None:
             for m in res.get("items", [])
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def post_chat_message(chat_id: str, text: str, dry_run: bool = False) -> dict:
         """Post a message to a live chat as the channel."""
         if dry_run:
@@ -172,7 +174,7 @@ def register(mcp) -> None:
         )
         return {"posted": res["id"]}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def delete_chat_message(message_id: str, dry_run: bool = False) -> dict:
         """Delete a live chat message."""
         if dry_run:
@@ -181,7 +183,7 @@ def register(mcp) -> None:
         yt.call(yt.data.liveChatMessages().delete(id=message_id), op="delete")
         return {"deleted": message_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def ban_chat_user(
         chat_id: str, channel_id: str, duration_seconds: int | None = None, dry_run: bool = False
     ) -> dict:

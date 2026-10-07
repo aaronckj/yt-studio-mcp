@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 
 FOOTER_MARKER = "\n\n---\n"
@@ -81,7 +83,7 @@ def _batch_update(yt, plan: list[tuple[str, dict]], dry_run: bool) -> dict:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def batch_update_descriptions(
         mode: str,
         text: str,
@@ -129,7 +131,7 @@ def register(mcp) -> None:
             return preview("batch_update_descriptions", result)
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def batch_update_tags(
         add: list[str] | None = None,
         remove: list[str] | None = None,
@@ -174,7 +176,7 @@ def register(mcp) -> None:
                "not_found": [v for v in ids if v not in snippets]}
         return preview("batch_update_tags", out) if dry_run else out
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def made_for_kids_audit() -> dict:
         """Audit every upload's made-for-kids designation (COPPA). Reports both
         the platform-effective flag and the self-declared one per video."""
@@ -211,7 +213,7 @@ def register(mcp) -> None:
             "note": "madeForKids=True disables comments on those videos",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def post_stream_digest(start: str, end: str) -> dict:
         """Channel performance digest for a date window (YYYY-MM-DD): totals,
         per-day trend, and top videos — run it the morning after a stream."""

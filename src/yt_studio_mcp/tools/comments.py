@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 
 
@@ -21,7 +23,7 @@ def _thread_summary(t: dict) -> dict:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_comments(
         video_id: str | None = None,
         limit: int = 100,
@@ -39,7 +41,7 @@ def register(mcp) -> None:
         items = yt.paginate(yt.data.commentThreads(), "list", limit=limit, **params)
         return [_thread_summary(t) for t in items]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_held_comments(limit: int = 100, status: str = "heldForReview") -> list[dict]:
         """Comments awaiting moderation, channel-wide.
 
@@ -60,7 +62,7 @@ def register(mcp) -> None:
         )
         return [_thread_summary(t) for t in items]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def post_video_question(video_id: str, text: str, dry_run: bool = False) -> dict:
         """Post a top-level comment on a video as the channel (e.g. a question
         prompt for viewers). Note: the API cannot pin comments — pin manually
@@ -86,7 +88,7 @@ def register(mcp) -> None:
             "note": "pin manually in YouTube Studio if desired (no pin API)",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def reply_to_comment(comment_id: str, text: str, dry_run: bool = False) -> dict:
         """Reply to a comment as the channel."""
         if dry_run:
@@ -101,7 +103,7 @@ def register(mcp) -> None:
         )
         return {"replied": res["id"], "parent": comment_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def moderate_comment(comment_id: str, status: str, dry_run: bool = False) -> dict:
         """Set moderation status: published | heldForReview | rejected."""
         if status not in ("published", "heldForReview", "rejected"):
@@ -115,7 +117,7 @@ def register(mcp) -> None:
         )
         return {"moderated": comment_id, "status": status}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def mark_spam(comment_id: str, dry_run: bool = False) -> dict:
         """Flag a comment as spam."""
         if dry_run:
@@ -124,7 +126,7 @@ def register(mcp) -> None:
         yt.call(yt.data.comments().markAsSpam(id=comment_id), op="markAsSpam")
         return {"marked_spam": comment_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def delete_comment(comment_id: str, dry_run: bool = False) -> dict:
         """Delete a comment authored by the channel (own comments only)."""
         if dry_run:

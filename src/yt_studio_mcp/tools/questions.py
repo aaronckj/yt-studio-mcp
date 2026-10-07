@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 from ..paths import question_state_path
 
@@ -48,7 +50,7 @@ def studio_comments_url(video_id: str) -> str:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def post_giveaway_question(
         video_id: str,
         question: str,
@@ -99,7 +101,7 @@ def register(mcp) -> None:
             "note": "open pin_here and pin the comment (no pin API)",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def giveaway_question_status() -> dict:
         """Cross-reference every upload against posted question comments:
         which videos still need one, which are posted (with pin links)."""

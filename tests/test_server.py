@@ -112,3 +112,18 @@ def test_batch_tags_preserves_existing():
 
     src = inspect.getsource(bulk)
     assert "new = [t for t in cur if t.lower() not in rm_l]" in src
+
+
+def test_every_tool_declares_read_only_hint():
+    import asyncio
+
+    from yt_studio_mcp.server import build_app
+
+    tools = asyncio.run(build_app().list_tools())
+    assert tools
+    for t in tools:
+        assert t.annotations is not None and t.annotations.readOnlyHint is not None, t.name
+    by = {t.name: t.annotations for t in tools}
+    assert by["post_stream_digest"].readOnlyHint is True
+    assert by["list_videos"].readOnlyHint is True
+    assert by["delete_video"].readOnlyHint is False and by["delete_video"].destructiveHint is True

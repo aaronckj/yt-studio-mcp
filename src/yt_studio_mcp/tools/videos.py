@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 from ..validate import check_future_schedule, check_privacy, is_past
 
@@ -50,7 +52,7 @@ def _video_summary(item: dict) -> dict:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def channel_info() -> dict:
         """Get the authorized channel's profile, statistics, and uploads playlist id."""
         yt = get_yt()
@@ -72,7 +74,7 @@ def register(mcp) -> None:
             "uploads_playlist": ch["contentDetails"]["relatedPlaylists"]["uploads"],
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def update_channel(
         description: str | None = None,
         keywords: str | None = None,
@@ -113,7 +115,7 @@ def register(mcp) -> None:
         )
         return {"updated": cur["id"], "changes": changes}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_subscribers(limit: int = 50) -> dict:
         """List PUBLIC subscribers (YouTube only reveals subscribers who set
         their subscriptions public — most don't; totals live in channel_info)."""
@@ -136,7 +138,7 @@ def register(mcp) -> None:
             "note": "private-mode subscribers are not listable by design",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_videos(limit: int = 25) -> list[dict]:
         """List the channel's uploaded videos, newest first, with basic stats."""
         yt = get_yt()
@@ -153,7 +155,7 @@ def register(mcp) -> None:
         )
         return [_video_summary(v) for v in res.get("items", [])]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def get_video(video_id: str) -> dict:
         """Get full metadata and statistics for one video."""
         yt = get_yt()
@@ -178,7 +180,7 @@ def register(mcp) -> None:
         )
         return out
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def update_video(
         video_id: str,
         title: str | None = None,
@@ -286,7 +288,7 @@ def register(mcp) -> None:
         return {"updated": video_id, "before": before, "goes_public_now": goes_public,
                 "changes": changes}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def set_thumbnail(video_id: str, image_path: str, dry_run: bool = False) -> dict:
         """Set a custom thumbnail from a local image file (JPG/PNG, <=2MB)."""
         if err := check_thumbnail_file(image_path):
@@ -314,7 +316,7 @@ def register(mcp) -> None:
             out["archived_to"] = saved
         return out
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def upload_video(
         file_path: str,
         title: str,
@@ -361,7 +363,7 @@ def register(mcp) -> None:
         return {"uploaded": response["id"], "title": title, "privacy": privacy,
                 "publish_at": publish_at}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def delete_video(video_id: str, dry_run: bool = False) -> dict:
         """Permanently delete a video. Irreversible."""
         yt = get_yt()

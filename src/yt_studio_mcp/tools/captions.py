@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_captions(video_id: str) -> list[dict]:
         """List caption tracks on a video."""
         yt = get_yt()
@@ -24,7 +26,7 @@ def register(mcp) -> None:
             for c in res.get("items", [])
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def upload_caption(
         video_id: str, language: str, file_path: str, name: str = "", dry_run: bool = False
     ) -> dict:
@@ -49,7 +51,7 @@ def register(mcp) -> None:
         )
         return {"uploaded": res["id"], "video_id": video_id, "language": language}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def download_caption(caption_id: str, fmt: str = "srt") -> dict:
         """Download a caption track's text. fmt: srt|vtt."""
         yt = get_yt()

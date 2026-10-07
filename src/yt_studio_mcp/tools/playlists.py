@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 from ..validate import check_privacy
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_playlists(limit: int = 50) -> list[dict]:
         """List the channel's playlists."""
         yt = get_yt()
@@ -23,7 +25,7 @@ def register(mcp) -> None:
             for p in items
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def create_playlist(
         title: str, description: str = "", privacy: str = "public", dry_run: bool = False
     ) -> dict:
@@ -45,7 +47,7 @@ def register(mcp) -> None:
         )
         return {"created": res["id"], "title": title}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def update_playlist(
         playlist_id: str,
         title: str | None = None,
@@ -93,7 +95,7 @@ def register(mcp) -> None:
         )
         return {"updated": playlist_id, "changes": changes}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def delete_playlist(playlist_id: str, dry_run: bool = False) -> dict:
         """Delete a playlist (videos are not deleted)."""
         if dry_run:
@@ -102,7 +104,7 @@ def register(mcp) -> None:
         yt.call(yt.data.playlists().delete(id=playlist_id), op="delete")
         return {"deleted": playlist_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def add_to_playlist(
         playlist_id: str, video_id: str, position: int | None = None, dry_run: bool = False
     ) -> dict:
@@ -125,7 +127,7 @@ def register(mcp) -> None:
         )
         return {"added": res["id"], "video_id": video_id, "playlist_id": playlist_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def remove_from_playlist(playlist_item_id: str, dry_run: bool = False) -> dict:
         """Remove an item from a playlist by playlist-item id (from list results)."""
         if dry_run:
@@ -134,7 +136,7 @@ def register(mcp) -> None:
         yt.call(yt.data.playlistItems().delete(id=playlist_item_id), op="delete")
         return {"removed": playlist_item_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_playlist_items(playlist_id: str, limit: int = 50) -> list[dict]:
         """List videos in a playlist."""
         yt = get_yt()

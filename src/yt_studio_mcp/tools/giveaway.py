@@ -44,6 +44,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from random import Random
 
+from mcp.types import ToolAnnotations
+
 from ..client import ApiError, get_yt, preview
 from ..paths import giveaway_dir
 from ..validate import parse_rfc3339
@@ -383,7 +385,7 @@ def csv_safe(value: str) -> str:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def collect_entries(
         start: str,
         end: str,
@@ -418,7 +420,7 @@ def register(mcp) -> None:
             )
         return out
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def draw_winners(
         snapshot_path: str,
         n: int = 5,
@@ -509,7 +511,7 @@ def register(mcp) -> None:
             "reproduce": f"draw_winners(snapshot_path, n={n}, seed={seed!r}, algo={algo!r})",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def make_verification_code(
         audit_path: str, winner_channel_id: str, rotate: bool = False
     ) -> dict:
@@ -532,7 +534,7 @@ def register(mcp) -> None:
         _write_atomic(path, json.dumps(audit, indent=2))
         return {"channel_id": winner_channel_id, "code": code}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def check_verification_reply(audit_path: str, comment_id: str, winner_channel_id: str) -> dict:
         """Verify a winner's reply: fetches the comment and checks it was authored
         by the winning channel and contains their verification code."""
@@ -563,7 +565,7 @@ def register(mcp) -> None:
             "code_present": code in text,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def export_entries_csv(snapshot_path: str, csv_path: str | None = None) -> dict:
         """Export a snapshot's entries to CSV (channel_id, author, video_id,
         comment_id, published) for spreadsheets or records. Display names are
@@ -592,7 +594,7 @@ def register(mcp) -> None:
             "entry_hash": snap["entry_hash"],
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def winner_announcement(audit_path: str, claim_days: int = 7, contact: str = "") -> dict:
         """Draft winner-announcement text (for a pinned comment / community post)
         from a draw's audit record. Review before posting."""
@@ -620,7 +622,7 @@ def register(mcp) -> None:
         ]
         return {"text": "\n".join(lines), "winners": names}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def post_winner_reply(comment_id: str, text: str, dry_run: bool = False) -> dict:
         """Reply to a winning comment as the channel (winner announcement/notification)."""
         if dry_run:

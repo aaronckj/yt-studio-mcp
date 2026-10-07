@@ -18,6 +18,8 @@ import secrets as pysecrets
 from contextlib import contextmanager
 from pathlib import Path
 
+from mcp.types import ToolAnnotations
+
 from ..client import get_yt, preview
 from ..paths import config_dir, scan_state_path, wordlist_path
 from ..validate import parse_rfc3339
@@ -216,12 +218,12 @@ def write_watermark(value: str) -> None:
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def banned_words_list() -> dict:
         """Show the managed banned-word list used by scan_comments."""
         return {"words": _load_words(), "path": str(wordlist_path())}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def banned_words_add(words: list[str]) -> dict:
         """Add words/phrases to the banned list."""
         clean = [w for w in words if isinstance(w, str) and w.strip()]
@@ -234,7 +236,7 @@ def register(mcp) -> None:
         _save_words(current + clean)
         return {"words": load_wordlist_strict()}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
     def banned_words_remove(words: list[str]) -> dict:
         """Remove words from the banned list."""
         drop = {w.lower() for w in words}
@@ -248,7 +250,7 @@ def register(mcp) -> None:
         _save_words(kept)
         return {"words": load_wordlist_strict()}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def scan_comments(
         video_id: str | None = None,
         limit: int = 500,

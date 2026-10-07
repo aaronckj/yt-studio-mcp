@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 from ..client import preview
 from ..twitch import Twitch, TwitchNotConfigured, set_channel
 
 
 def register(mcp) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def twitch_status() -> dict:
         """Whether Twitch is configured, and which channel it would write to."""
         try:
@@ -24,7 +26,7 @@ def register(mcp) -> None:
             "category": ch.get("game_name"),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def twitch_authorize_url() -> dict:
         """Step 1 of connecting Twitch: the URL to approve as the channel owner.
 
@@ -46,7 +48,7 @@ def register(mcp) -> None:
             "note": "authorization codes expire within minutes",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def twitch_finish_auth(code: str) -> dict:
         """Step 2: exchange the pasted ?code=... for a stored refresh token.
 
@@ -70,7 +72,7 @@ def register(mcp) -> None:
                             "one from twitch_authorize_url"}
         return {"ok": True, "detail": msg}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def twitch_get_channel() -> dict:
         """Current Twitch title, category and tags."""
         ch = Twitch().get_channel()
@@ -82,7 +84,7 @@ def register(mcp) -> None:
             "language": ch.get("broadcaster_language"),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def twitch_set_channel(
         title: str = "",
         game_name: str = "",
