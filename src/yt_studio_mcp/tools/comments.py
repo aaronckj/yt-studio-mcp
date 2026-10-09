@@ -22,24 +22,59 @@ def _thread_summary(t: dict) -> dict:
     }
 
 
+def _reply_summary(c: dict, me: str) -> dict:
+    sn = c["snippet"]
+    cid = sn.get("authorChannelId", {}).get("value")
+    return {
+        "comment_id": c["id"],
+        "author": sn.get("authorDisplayName"),
+        "author_channel_id": cid,
+        "is_channel": cid == me,
+        "text": sn.get("textOriginal", sn.get("textDisplay", "")),
+        "published": sn.get("publishedAt"),
+        "like_count": sn.get("likeCount"),
+    }
+
+
+def _with_replies(yt, threads: list[dict], me: str) -> list[dict]:
+    """Every reply of each thread (author, text, is_channel). One comments.list call
+    (1 unit) per thread that has replies; threads without replies cost nothing."""
+    for t in threads:
+        if not t.get("reply_count"):
+            t["replies"] = []
+            continue
+        items = yt.paginate(yt.data.comments(), "list", limit=500, page_size=100,
+                            part="snippet", parentId=t["thread_id"], textFormat="plainText")
+        replies = [_reply_summary(c, me) for c in items]
+        t["replies"] = sorted(replies, key=lambda r: r["published"] or "")
+    return threads
+
+
 def register(mcp) -> None:
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_comments(
         video_id: str | None = None,
         limit: int = 100,
         search_terms: str | None = None,
+        include_replies: bool = False,
     ) -> list[dict]:
-        """List comment threads for one video, or channel-wide when video_id is omitted."""
+        """List comment threads for one video, or channel-wide when video_id is omitted.
+
+        include_replies=True adds each thread's replies (author, text, published, and
+        is_channel when the reply is the channel's own) - one extra API unit per thread
+        that has replies."""
         yt = get_yt()
         params: dict = {"part": "snippet", "order": "time", "textFormat": "plainText"}
+        me = _my_channel_id(yt) if (include_replies or not video_id) else ""
         if video_id:
             params["videoId"] = video_id
         else:
-            params["allThreadsRelatedToChannelId"] = _my_channel_id(yt)
+            params["allThreadsRelatedToChannelId"] = me
         if search_terms:
             params["searchTerms"] = search_terms
         items = yt.paginate(yt.data.commentThreads(), "list", limit=limit, **params)
-        return [_thread_summary(t) for t in items]
+        threads = [_thread_summary(t) for t in items]
+        return _with_replies(yt, threads, me) if include_replies else threads
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_held_comments(limit: int = 100, status: str = "heldForReview") -> list[dict]:
