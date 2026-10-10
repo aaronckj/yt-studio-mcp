@@ -85,11 +85,13 @@ One-time setup:
    Authorization codes expire in minutes -- paste promptly.
 
 This stores `twitch_client_id`, `twitch_client_secret` and
-`twitch_refresh_token` in the configured secret backend. The grant requests
-every broadcaster scope in `twitch.SCOPE_LIST` (including `channel:manage:broadcast`
-and `channel:manage:raids`) except `channel:read:stream_key`, `user:read:email`
-and the whisper scopes, which are never requested (see `EXCLUDED_SCOPES`) — an
-app (client-credentials) token cannot modify a channel. `twitch_status` lists
+`twitch_refresh_token` in the configured secret backend. By default the grant
+requests only `channel:manage:broadcast` and `channel:manage:raids`
+(`twitch.DEFAULT_SCOPES`) — an app (client-credentials) token cannot modify a
+channel. Set `YT_MCP_TWITCH_EXTENDED_SCOPES=1` (exactly `1`) in the server's
+environment to request every broadcaster scope in `twitch.EXTENDED_SCOPES`
+instead; `channel:read:stream_key`, `user:read:email` and the whisper scopes are
+never requested in either mode (`EXCLUDED_SCOPES`). `twitch_status` lists
 granted vs requested scopes; when `scopes.missing` is non-empty, re-approve once
 with `twitch_authorize_url` then `twitch_finish_auth`. Twitch rotates refresh tokens, and the rotated value is
 persisted automatically (except on the read-only `env` backend).

@@ -1,4 +1,4 @@
-"""One-time Twitch OAuth: mint a user refresh token carrying twitch.SCOPES.
+"""One-time Twitch OAuth: mint a user refresh token carrying twitch.scopes().
 
 Twitch will NOT let an app (client-credentials) token modify a channel, so this
 has to be a real user grant. Run once:
@@ -22,7 +22,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .secrets import get_store
-from .twitch import OAUTH, SCOPES
+from .twitch import OAUTH, scopes
 
 # Twitch matches the redirect EXACTLY -- a trailing slash is a different URI.
 # Override with TWITCH_REDIRECT_URI to match whatever the app has registered.
@@ -56,7 +56,7 @@ def authorize_url(client_id: str, state: str) -> str:
         "client_id": client_id,
         "redirect_uri": REDIRECT,
         "response_type": "code",
-        "scope": SCOPES,
+        "scope": scopes(),
         "state": state,
         "force_verify": "true",
     })
@@ -114,7 +114,7 @@ def run_twitch_auth(client_id: str, client_secret: str) -> str:
         "client_id": client_id,
         "redirect_uri": REDIRECT,
         "response_type": "code",
-        "scope": SCOPES,
+        "scope": scopes(),
         "state": state,
         "force_verify": "true",
     })

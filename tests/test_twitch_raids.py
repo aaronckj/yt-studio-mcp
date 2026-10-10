@@ -83,16 +83,35 @@ def _base(extra=None):
 
 # ---- scopes -----------------------------------------------------------------------------------
 
-def test_scopes_include_raids_and_broadcast():
-    req = tw.SCOPES.split()
-    assert "channel:manage:raids" in req
-    assert "channel:manage:broadcast" in req
-    assert tuple(req) == tw.SCOPE_LIST, "SCOPES is the space-joined SCOPE_LIST"
+SENSITIVE = ("channel:read:stream_key", "user:read:email", "user:manage:whispers",
+             "user:read:whispers", "whispers:read", "whispers:edit")
+
+
+@pytest.fixture()
+def extended(monkeypatch):
+    monkeypatch.setenv("YT_MCP_TWITCH_EXTENDED_SCOPES", "1")
+
+
+def test_default_scopes_are_least_privilege(monkeypatch):
+    monkeypatch.delenv("YT_MCP_TWITCH_EXTENDED_SCOPES", raising=False)
+    assert tw.DEFAULT_SCOPES == ("channel:manage:broadcast", "channel:manage:raids")
+    assert tw.scope_list() == tw.DEFAULT_SCOPES
+    assert tw.scopes() == "channel:manage:broadcast channel:manage:raids"
+    assert tw.SCOPES == tw.scopes(), "the module constant stays the default set"
+
+
+@pytest.mark.parametrize("val", ["0", "", "yes", "true "])
+def test_only_exactly_1_turns_on_extended(monkeypatch, val):
+    monkeypatch.setenv("YT_MCP_TWITCH_EXTENDED_SCOPES", val)
+    assert tw.scope_list() == tw.DEFAULT_SCOPES
+
+
+def test_extended_scopes_are_the_full_broadcaster_set(extended):
+    req = tw.scope_list()
+    assert req == tw.EXTENDED_SCOPES
+    assert tw.scopes().split() == list(req)
     assert len(req) == len(set(req)), "no duplicates"
-
-
-def test_full_broadcaster_scope_set_is_requested():
-    req = set(tw.SCOPE_LIST)
+    assert set(tw.DEFAULT_SCOPES) <= set(req)
     for s in ("bits:read", "clips:edit", "moderation:read", "channel:bot", "user:bot",
               "user:read:chat", "user:write:chat", "chat:read", "chat:edit",
               "moderator:manage:shoutouts", "moderator:read:followers",
@@ -102,23 +121,36 @@ def test_full_broadcaster_scope_set_is_requested():
         assert s in req, s
 
 
-def test_sensitive_scopes_are_never_requested():
+@pytest.mark.parametrize("mode", ["default", "extended"])
+def test_sensitive_scopes_are_never_requested(monkeypatch, mode):
     """A leaked token must not expose the stream key, the account email or private messages."""
-    req = set(tw.SCOPE_LIST)
-    for s in ("channel:read:stream_key", "user:read:email", "user:manage:whispers",
-              "user:read:whispers", "whispers:read", "whispers:edit"):
-        assert s not in req, s
-        assert s in tw.EXCLUDED_SCOPES
-
-
-def test_authorize_url_carries_every_scope():
+    if mode == "extended":
+        monkeypatch.setenv("YT_MCP_TWITCH_EXTENDED_SCOPES", "1")
+    else:
+        monkeypatch.delenv("YT_MCP_TWITCH_EXTENDED_SCOPES", raising=False)
     from yt_studio_mcp.twitch_auth import authorize_url
 
     q = urllib.parse.parse_qs(urllib.parse.urlsplit(authorize_url("cid", "st")).query)
-    assert q["scope"][0].split() == list(tw.SCOPE_LIST)
+    sent = q["scope"][0].split()
+    assert sent == list(tw.scope_list())
+    for s in SENSITIVE:
+        assert s not in tw.scope_list() and s not in sent, s
+        assert s not in tw.EXTENDED_SCOPES, s
+        assert s in tw.EXCLUDED_SCOPES, s
 
 
-def test_scope_report_lists_granted_requested_missing(monkeypatch):
+def test_authorize_url_follows_the_mode_at_call_time(monkeypatch):
+    from yt_studio_mcp.twitch_auth import authorize_url
+
+    monkeypatch.delenv("YT_MCP_TWITCH_EXTENDED_SCOPES", raising=False)
+    short = urllib.parse.parse_qs(urllib.parse.urlsplit(authorize_url("c", "s")).query)["scope"][0]
+    monkeypatch.setenv("YT_MCP_TWITCH_EXTENDED_SCOPES", "1")
+    full = urllib.parse.parse_qs(urllib.parse.urlsplit(authorize_url("c", "s")).query)["scope"][0]
+    assert short.split() == list(tw.DEFAULT_SCOPES)
+    assert full.split() == list(tw.EXTENDED_SCOPES)
+
+
+def test_scope_report_lists_granted_requested_missing(monkeypatch, extended):
     calls = []
     table = _base({("GET", "oauth2/validate"): {
         "client_id": "cid", "login": "ourchannel", "user_id": "42", "expires_in": 100,
@@ -126,7 +158,7 @@ def test_scope_report_lists_granted_requested_missing(monkeypatch):
     monkeypatch.setattr(tw, "urlopen", _router(calls, table))
     rep = tw.Twitch().scope_report()
     assert rep["granted"] == ["channel:manage:broadcast", "some:old:scope"]
-    assert rep["requested"] == list(tw.SCOPE_LIST)
+    assert rep["requested"] == list(tw.EXTENDED_SCOPES)
     assert "channel:manage:raids" in rep["missing"]
     assert "channel:manage:broadcast" not in rep["missing"]
     assert rep["extra"] == ["some:old:scope"]
@@ -136,8 +168,18 @@ def test_scope_report_lists_granted_requested_missing(monkeypatch):
     assert v[3].get("Authorization") == "OAuth atok", "validate uses the OAuth prefix"
 
 
-def test_scope_report_all_granted(monkeypatch):
-    table = _base({("GET", "oauth2/validate"): {"scopes": list(tw.SCOPE_LIST)}})
+def test_scope_report_default_mode_only_needs_the_two(monkeypatch):
+    monkeypatch.delenv("YT_MCP_TWITCH_EXTENDED_SCOPES", raising=False)
+    table = _base({("GET", "oauth2/validate"): {"scopes": ["channel:manage:broadcast"]}})
+    monkeypatch.setattr(tw, "urlopen", _router([], table))
+    rep = tw.Twitch().scope_report()
+    assert rep["requested"] == list(tw.DEFAULT_SCOPES)
+    assert rep["missing"] == ["channel:manage:raids"]
+    assert rep["raids_enabled"] is False and "re-approve" in rep["hint"].lower()
+
+
+def test_scope_report_all_granted(monkeypatch, extended):
+    table = _base({("GET", "oauth2/validate"): {"scopes": list(tw.EXTENDED_SCOPES)}})
     monkeypatch.setattr(tw, "urlopen", _router([], table))
     rep = tw.Twitch().scope_report()
     assert rep["missing"] == [] and rep["raids_enabled"] is True and rep["hint"] == ""

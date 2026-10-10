@@ -9,7 +9,7 @@ Credentials live in the same secret store as the Google ones (YT_MCP_SECRETS):
 
     twitch_client_id       from a Twitch application (dev.twitch.tv/console/apps)
     twitch_client_secret   same application
-    twitch_refresh_token   user grant carrying SCOPES (below)
+    twitch_refresh_token   user grant carrying scopes() (below)
 
 An app (client-credentials) token CANNOT modify a channel -- Helix requires a
 USER token for that scope. Run `yt-studio-mcp twitch-auth` once to mint it.
@@ -28,11 +28,21 @@ from .secrets import get_store
 
 HELIX = "https://api.twitch.tv/helix"
 OAUTH = "https://id.twitch.tv/oauth2"
+# What the package asks for by default: least privilege for what it does
+# (set the channel title/category, start and cancel raids).
+DEFAULT_SCOPES: tuple[str, ...] = (
+    "channel:manage:broadcast",
+    "channel:manage:raids",
+)
+EXTENDED_ENV = "YT_MCP_TWITCH_EXTENDED_SCOPES"
+# Opt-in with YT_MCP_TWITCH_EXTENDED_SCOPES=1 in the environment that builds the
+# authorize URL (and the one that runs twitch_status, so "missing" is judged
+# against the same list).
 # Owner, 2026-10-10: "give it all the twitch access you can".
 # Every broadcaster-user scope Twitch documents, one per line, MINUS the ones in
-# EXCLUDED_SCOPES. Changing this list means the owner re-approves once
+# EXCLUDED_SCOPES. Changing the requested list means the owner re-approves once
 # (twitch_authorize_url -> twitch_finish_auth); twitch_status says which are missing.
-SCOPE_LIST: tuple[str, ...] = (
+EXTENDED_SCOPES: tuple[str, ...] = (
     "analytics:read:extensions",
     "analytics:read:games",
     "bits:read",
@@ -119,7 +129,18 @@ EXCLUDED_SCOPES: tuple[str, ...] = (
     "whispers:read",
     "whispers:edit",
 )
-SCOPES = " ".join(SCOPE_LIST)
+
+
+def scope_list() -> tuple[str, ...]:
+    """The scopes to request, read at call time: EXTENDED only when the env var is exactly "1"."""
+    return EXTENDED_SCOPES if os.environ.get(EXTENDED_ENV) == "1" else DEFAULT_SCOPES
+
+
+def scopes() -> str:
+    return " ".join(scope_list())
+
+
+SCOPES = " ".join(DEFAULT_SCOPES)  # back-compat constant; use scopes() for the live value
 RAID_SCOPE = "channel:manage:raids"
 REAPPROVE_HINT = (
     "Re-approve Twitch to enable raids: open the link from twitch_authorize_url as the "
@@ -266,15 +287,16 @@ class Twitch:
         res = _http(f"{OAUTH}/validate",
                     headers={"Authorization": f"OAuth {self._access_token()}"})
         granted = sorted(res.get("scopes") or [])
-        missing = [s for s in SCOPE_LIST if s not in granted]
+        requested = scope_list()
+        missing = [s for s in requested if s not in granted]
         raids = RAID_SCOPE in granted
         hint = ""
         if missing:
             hint = (REAPPROVE_HINT if not raids else
                     "Re-approve Twitch to grant the missing scopes: twitch_authorize_url, "
                     "approve as the channel owner, then twitch_finish_auth(code=...).")
-        return {"granted": granted, "requested": list(SCOPE_LIST), "missing": missing,
-                "extra": [s for s in granted if s not in SCOPE_LIST],
+        return {"granted": granted, "requested": list(requested), "missing": missing,
+                "extra": [s for s in granted if s not in requested],
                 "raids_enabled": raids, "hint": hint}
 
     def users_by_login(self, logins: list[str]) -> list[dict]:
