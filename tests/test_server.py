@@ -37,6 +37,8 @@ EXPECTED = {
     # twitch (multistream metadata; the video is mirrored, the title is not)
     "twitch_status", "twitch_get_channel", "twitch_set_channel",
     "twitch_authorize_url", "twitch_finish_auth",
+    # twitch raids (returning a raid is the thank-you)
+    "twitch_raid", "twitch_raid_cancel", "twitch_raid_candidates",
 }
 
 

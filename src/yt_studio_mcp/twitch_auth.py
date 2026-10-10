@@ -1,4 +1,4 @@
-"""One-time Twitch OAuth: mint a user refresh token with channel:manage:broadcast.
+"""One-time Twitch OAuth: mint a user refresh token carrying twitch.SCOPES.
 
 Twitch will NOT let an app (client-credentials) token modify a channel, so this
 has to be a real user grant. Run once:

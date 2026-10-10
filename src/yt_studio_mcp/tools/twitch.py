@@ -1,29 +1,49 @@
-"""Twitch channel tools -- the other half of going live when multistreaming."""
+"""Twitch channel tools -- the other half of going live when multistreaming -- and raids."""
 
 from __future__ import annotations
 
 from mcp.types import ToolAnnotations
 
 from ..client import preview
-from ..twitch import Twitch, TwitchNotConfigured, set_channel
+from ..twitch import (
+    Twitch,
+    TwitchError,
+    TwitchNotConfigured,
+    TwitchRaidError,
+    raid_cancel,
+    raid_candidates,
+    raid_start,
+    set_channel,
+    valid_login,
+)
 
 
 def register(mcp) -> None:
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def twitch_status() -> dict:
-        """Whether Twitch is configured, and which channel it would write to."""
+        """Whether Twitch is configured, which channel it would write to, and its scopes.
+
+        scopes.missing lists what the stored grant lacks (e.g. channel:manage:raids);
+        scopes.hint says how to re-approve. Never returns the stream key or email.
+        """
         try:
             tw = Twitch()
         except TwitchNotConfigured as exc:
             return {"configured": False, "missing": exc.missing, "hint": str(exc)}
         me = tw.me()
         ch = tw.get_channel()
+        try:
+            scopes = tw.scope_report()
+        except TwitchError as exc:
+            scopes = {"error": str(exc)[:200]}
         return {
             "configured": True,
             "login": me.get("login"),
             "broadcaster_id": me.get("id"),
             "title": ch.get("title"),
             "category": ch.get("game_name"),
+            "scopes": scopes,
+            "raids_enabled": bool(scopes.get("raids_enabled")),
         }
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -103,3 +123,42 @@ def register(mcp) -> None:
             return preview("twitch_set_channel",
                            {"title": title, "game_name": game_name, "tags": tags})
         return set_channel(title or None, game_name or None, tags)
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+    def twitch_raid_candidates(logins: list[str]) -> dict:
+        """Which of these Twitch channels are live right now: game, viewer count, title.
+
+        Up to 100 logins per Helix call (batched). Invalid logins come back in
+        `invalid` and are never sent to Twitch.
+        """
+        return raid_candidates(logins)
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    def twitch_raid(to_login: str, dry_run: bool = False) -> dict:
+        """Raid another channel with our live Twitch audience.
+
+        Twitch shows a ~90 s countdown, then sends the raid; ending our stream
+        before that cancels it. Needs the channel:manage:raids scope (see
+        twitch_status). Limit: 10 raid requests per 10 minutes.
+        """
+        login = valid_login(to_login)
+        if not login:
+            return TwitchRaidError("invalid_login", f"not a Twitch login: {to_login!r}",
+                                   "Logins are 3-25 letters, digits or underscores.").as_dict()
+        if dry_run:
+            return preview("twitch_raid", {"to_login": login,
+                                           "note": "Twitch sends the raid ~90 s after this"})
+        try:
+            return raid_start(login)
+        except TwitchRaidError as exc:
+            return exc.as_dict()
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    def twitch_raid_cancel(dry_run: bool = False) -> dict:
+        """Cancel our pending raid (only during Twitch's countdown)."""
+        if dry_run:
+            return preview("twitch_raid_cancel", {})
+        try:
+            return raid_cancel()
+        except TwitchRaidError as exc:
+            return exc.as_dict()

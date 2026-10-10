@@ -9,7 +9,7 @@ Credentials live in the same secret store as the Google ones (YT_MCP_SECRETS):
 
     twitch_client_id       from a Twitch application (dev.twitch.tv/console/apps)
     twitch_client_secret   same application
-    twitch_refresh_token   user grant carrying `channel:manage:broadcast`
+    twitch_refresh_token   user grant carrying SCOPES (below)
 
 An app (client-credentials) token CANNOT modify a channel -- Helix requires a
 USER token for that scope. Run `yt-studio-mcp twitch-auth` once to mint it.
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.parse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -27,7 +28,106 @@ from .secrets import get_store
 
 HELIX = "https://api.twitch.tv/helix"
 OAUTH = "https://id.twitch.tv/oauth2"
-SCOPES = "channel:manage:broadcast"
+# Owner, 2026-10-10: "give it all the twitch access you can".
+# Every broadcaster-user scope Twitch documents, one per line, MINUS the ones in
+# EXCLUDED_SCOPES. Changing this list means the owner re-approves once
+# (twitch_authorize_url -> twitch_finish_auth); twitch_status says which are missing.
+SCOPE_LIST: tuple[str, ...] = (
+    "analytics:read:extensions",
+    "analytics:read:games",
+    "bits:read",
+    "channel:bot",
+    "channel:edit:commercial",
+    "channel:manage:ads",
+    "channel:manage:broadcast",
+    "channel:manage:extensions",
+    "channel:manage:guest_star",
+    "channel:manage:moderators",
+    "channel:manage:polls",
+    "channel:manage:predictions",
+    "channel:manage:raids",
+    "channel:manage:redemptions",
+    "channel:manage:schedule",
+    "channel:manage:videos",
+    "channel:manage:vips",
+    "channel:moderate",
+    "channel:read:ads",
+    "channel:read:charity",
+    "channel:read:editors",
+    "channel:read:goals",
+    "channel:read:guest_star",
+    "channel:read:hype_train",
+    "channel:read:polls",
+    "channel:read:predictions",
+    "channel:read:redemptions",
+    "channel:read:subscriptions",
+    "channel:read:vips",
+    "chat:edit",
+    "chat:read",
+    "clips:edit",
+    "moderation:read",
+    "moderator:manage:announcements",
+    "moderator:manage:automod",
+    "moderator:manage:automod_settings",
+    "moderator:manage:banned_users",
+    "moderator:manage:blocked_terms",
+    "moderator:manage:chat_messages",
+    "moderator:manage:chat_settings",
+    "moderator:manage:guest_star",
+    "moderator:manage:shield_mode",
+    "moderator:manage:shoutouts",
+    "moderator:manage:unban_requests",
+    "moderator:manage:warnings",
+    "moderator:read:automod_settings",
+    "moderator:read:banned_users",
+    "moderator:read:blocked_terms",
+    "moderator:read:chat_messages",
+    "moderator:read:chat_settings",
+    "moderator:read:chatters",
+    "moderator:read:followers",
+    "moderator:read:guest_star",
+    "moderator:read:moderators",
+    "moderator:read:shield_mode",
+    "moderator:read:shoutouts",
+    "moderator:read:suspicious_users",
+    "moderator:read:unban_requests",
+    "moderator:read:vips",
+    "moderator:read:warnings",
+    "user:bot",
+    "user:edit",
+    "user:edit:broadcast",
+    "user:manage:blocked_users",
+    "user:manage:chat_color",
+    "user:read:blocked_users",
+    "user:read:broadcast",
+    "user:read:chat",
+    "user:read:emotes",
+    "user:read:follows",
+    "user:read:moderated_channels",
+    "user:read:subscriptions",
+    "user:write:chat",
+)
+# Owner, 2026-10-10: "ok we can pull those 3 back". Never requested, because a
+# leaked token would then expose the stream key (anyone could stream as us), the
+# account email, or let someone read and send private messages as us. The
+# whisper scopes (legacy IRC and Helix read) go for the same reason.
+EXCLUDED_SCOPES: tuple[str, ...] = (
+    "channel:read:stream_key",
+    "user:read:email",
+    "user:manage:whispers",
+    "user:read:whispers",
+    "whispers:read",
+    "whispers:edit",
+)
+SCOPES = " ".join(SCOPE_LIST)
+RAID_SCOPE = "channel:manage:raids"
+REAPPROVE_HINT = (
+    "Re-approve Twitch to enable raids: open the link from twitch_authorize_url as the "
+    "channel owner, approve, then pass the ?code=... to twitch_finish_auth."
+)
+# Fields Helix may return on /users that must never leave this module.
+_PRIVATE_USER_FIELDS = frozenset({"email"})
+_LOGIN = re.compile(r"[a-z0-9_]{3,25}")
 
 
 class TwitchNotConfigured(RuntimeError):
@@ -44,7 +144,29 @@ class TwitchNotConfigured(RuntimeError):
 
 
 class TwitchError(RuntimeError):
-    pass
+    """status / message carry the HTTP code and Twitch's own message, when there was one."""
+
+    def __init__(self, msg: str, status: int | None = None, message: str = "") -> None:
+        super().__init__(msg)
+        self.status = status
+        self.message = message
+
+
+class TwitchRaidError(TwitchError):
+    """A raid call that failed for a reason the caller can act on.
+
+    code: invalid_login | not_found | self_raid | missing_scope | rate_limited |
+          already_raiding | not_live | target_refuses | no_pending_raid | twitch_error
+    """
+
+    def __init__(self, code: str, msg: str, hint: str = "", status: int | None = None) -> None:
+        super().__init__(msg, status=status, message=msg)
+        self.code = code
+        self.hint = hint
+
+    def as_dict(self) -> dict:
+        return {"ok": False, "code": self.code, "error": str(self), "hint": self.hint,
+                "status": self.status}
 
 
 def _redact(url: str) -> str:
@@ -71,7 +193,12 @@ def _http(url: str, *, method: str = "GET", headers: dict | None = None,
     # but NOT a URLError. Flipping these silently swallows timeouts.
     except HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")[:400]
-        raise TwitchError(f"HTTP {exc.code} from {_redact(url)}: {body}") from exc
+        try:
+            message = str(json.loads(body).get("message") or "")
+        except (ValueError, AttributeError):
+            message = body
+        raise TwitchError(f"HTTP {exc.code} from {_redact(url)}: {body}",
+                          status=exc.code, message=message) from exc
     except URLError as exc:
         raise TwitchError(f"cannot reach {_redact(url)}: {exc.reason}") from exc
     except OSError as exc:
@@ -131,8 +258,40 @@ class Twitch:
             items = data.get("data") or []
             if not items:
                 raise TwitchError("token resolved to no user; re-run `yt-studio-mcp twitch-auth`")
-            self._user = items[0]
+            self._user = {k: v for k, v in items[0].items() if k not in _PRIVATE_USER_FIELDS}
         return self._user
+
+    def scope_report(self) -> dict:
+        """Granted vs requested scopes, from /oauth2/validate (needs the `OAuth` prefix)."""
+        res = _http(f"{OAUTH}/validate",
+                    headers={"Authorization": f"OAuth {self._access_token()}"})
+        granted = sorted(res.get("scopes") or [])
+        missing = [s for s in SCOPE_LIST if s not in granted]
+        raids = RAID_SCOPE in granted
+        hint = ""
+        if missing:
+            hint = (REAPPROVE_HINT if not raids else
+                    "Re-approve Twitch to grant the missing scopes: twitch_authorize_url, "
+                    "approve as the channel owner, then twitch_finish_auth(code=...).")
+        return {"granted": granted, "requested": list(SCOPE_LIST), "missing": missing,
+                "extra": [s for s in granted if s not in SCOPE_LIST],
+                "raids_enabled": raids, "hint": hint}
+
+    def users_by_login(self, logins: list[str]) -> list[dict]:
+        """Public /users rows for up to 100 logins (private fields stripped)."""
+        if not logins:
+            return []
+        q = urllib.parse.urlencode([("login", x) for x in logins])
+        data = _http(f"{HELIX}/users?{q}", headers=self._headers())
+        return [{k: v for k, v in u.items() if k not in _PRIVATE_USER_FIELDS}
+                for u in data.get("data") or []]
+
+    def live_streams(self, logins: list[str]) -> list[dict]:
+        """Live /streams rows for up to 100 logins; offline channels are simply absent."""
+        if not logins:
+            return []
+        q = urllib.parse.urlencode([("user_login", x) for x in logins] + [("first", 100)])
+        return _http(f"{HELIX}/streams?{q}", headers=self._headers()).get("data") or []
 
     def broadcaster_id(self) -> str:
         return self.me()["id"]
@@ -206,3 +365,135 @@ def set_channel(title: str | None, game_name: str | None,
         "category_requested": game_name,
         "category_resolved": resolved,
     }
+
+
+# ---- raids ------------------------------------------------------------------------------------
+# Twitch runs a raid after a ~90 s countdown (or when the owner presses "Raid Now"),
+# and drops it if our stream ends first. Helix allows 10 raid requests per 10 minutes.
+
+def valid_login(login) -> str | None:
+    """Lower-cased Twitch login, or None. Logins are [A-Za-z0-9_]{3,25}; '@' is tolerated."""
+    if not isinstance(login, str):
+        return None
+    x = login.strip().lstrip("@").lower()
+    return x if _LOGIN.fullmatch(x) else None
+
+
+def _raid_error(exc: TwitchError, action: str) -> TwitchRaidError:
+    status, msg = exc.status, (exc.message or "").strip()
+    low = msg.lower()
+    if status == 401:
+        return TwitchRaidError("missing_scope",
+                               f"Twitch refused the {action}: {msg or 'unauthorized'}",
+                               REAPPROVE_HINT, status)
+    if status == 429:
+        return TwitchRaidError("rate_limited", f"too many raid requests: {msg}",
+                               "Twitch allows 10 raid requests per 10 minutes; wait a few "
+                               "minutes and try again.", status)
+    if status == 409:
+        return TwitchRaidError("already_raiding", f"a raid is already pending: {msg}",
+                               "Cancel the pending raid first, or let it go out.", status)
+    if status == 404:
+        if action == "cancel":
+            return TwitchRaidError("no_pending_raid", f"nothing to cancel: {msg}",
+                                   "There is no pending raid; it may already have gone out.",
+                                   status)
+        return TwitchRaidError("not_found", f"Twitch could not find that channel: {msg}",
+                               "Check the login spelling.", status)
+    if status == 400 and ("not live" in low or "offline" in low or "not streaming" in low):
+        return TwitchRaidError("not_live", f"we are not live on Twitch: {msg}",
+                               "A raid can only start while our Twitch stream is live.", status)
+    if status == 400 and ("allow" in low or "setting" in low or "cannot raid" in low
+                          or "can't raid" in low or "blocked" in low or "not accept" in low):
+        return TwitchRaidError("target_refuses", f"that channel is not accepting this raid: {msg}",
+                               "They only accept raids from friends/followed channels, or "
+                               "raids are switched off; pick someone else.", status)
+    return TwitchRaidError("twitch_error", f"Twitch {action} failed (HTTP {status}): {msg}",
+                           "Try again in a minute; if it keeps failing, raid from the "
+                           "Twitch dashboard (/raid <login> in chat).", status)
+
+
+def raid_start(to_login: str, tw: Twitch | None = None) -> dict:
+    """Start a raid from our channel to `to_login`. Twitch sends it after ~90 s."""
+    login = valid_login(to_login)
+    if not login:
+        raise TwitchRaidError("invalid_login", f"not a Twitch login: {to_login!r}",
+                              "Logins are 3-25 letters, digits or underscores.")
+    tw = tw or Twitch()
+    try:
+        users = tw.users_by_login([login])
+        if not users:
+            raise TwitchRaidError("not_found", f"no Twitch channel named {login!r}",
+                                  "Check the login spelling.")
+        target = users[0]
+        me = tw.me()
+        if target["id"] == me["id"]:
+            raise TwitchRaidError("self_raid", "a channel cannot raid itself",
+                                  "Pick another channel.")
+        q = urllib.parse.urlencode({"from_broadcaster_id": me["id"],
+                                    "to_broadcaster_id": target["id"]})
+        res = _http(f"{HELIX}/raids?{q}", method="POST", headers=tw._headers())
+    except TwitchRaidError:
+        raise
+    except TwitchError as exc:
+        if exc.status is None:
+            raise
+        raise _raid_error(exc, "raid") from None
+    row = (res.get("data") or [{}])[0]
+    return {"ok": True, "from": me.get("login"), "to": target.get("login") or login,
+            "to_display": target.get("display_name") or login, "to_id": target["id"],
+            "created_at": row.get("created_at"), "is_mature": bool(row.get("is_mature"))}
+
+
+def raid_cancel(tw: Twitch | None = None) -> dict:
+    """Cancel our pending raid (only possible during the countdown)."""
+    tw = tw or Twitch()
+    try:
+        me = tw.me()
+        q = urllib.parse.urlencode({"broadcaster_id": me["id"]})
+        # DELETE /raids returns 204 with an empty body on success.
+        _http(f"{HELIX}/raids?{q}", method="DELETE", headers=tw._headers())
+    except TwitchError as exc:
+        if exc.status is None:
+            raise
+        raise _raid_error(exc, "cancel") from None
+    return {"ok": True, "cancelled": True, "from": me.get("login")}
+
+
+def raid_candidates(logins: list[str], tw: Twitch | None = None) -> dict:
+    """Live-now status for each login: game, viewers, title. Invalid logins are listed, not sent."""
+    seen: list[str] = []
+    invalid: list[str] = []
+    for raw in logins or []:
+        x = valid_login(raw)
+        if x is None:
+            invalid.append(str(raw))
+        elif x not in seen:
+            seen.append(x)
+    if not seen:
+        return {"channels": [], "invalid": invalid}
+    tw = tw or Twitch()
+    users: dict[str, dict] = {}
+    live: dict[str, dict] = {}
+    for n in range(0, len(seen), 100):
+        chunk = seen[n:n + 100]
+        for u in tw.users_by_login(chunk):
+            users[(u.get("login") or "").lower()] = u
+        for st in tw.live_streams(chunk):
+            live[(st.get("user_login") or "").lower()] = st
+    out = []
+    for login in seen:
+        u, st = users.get(login) or {}, live.get(login)
+        out.append({
+            "login": login,
+            "display_name": u.get("display_name") or login,
+            "id": u.get("id"),
+            "exists": bool(u),
+            "broadcaster_type": u.get("broadcaster_type") or "",
+            "live": bool(st),
+            "game_name": (st or {}).get("game_name"),
+            "viewer_count": (st or {}).get("viewer_count"),
+            "title": (st or {}).get("title"),
+            "started_at": (st or {}).get("started_at"),
+        })
+    return {"channels": out, "invalid": invalid}

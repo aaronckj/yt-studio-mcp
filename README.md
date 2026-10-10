@@ -47,7 +47,7 @@ claude mcp add yt-studio -s user -- uvx yt-studio-mcp
 | Captions | `list_captions`, `upload_caption`, `download_caption` |
 | Analytics | `channel_report`, `video_report`, `top_videos` |
 | Giveaways | `collect_entries`, `draw_winners`, `make_verification_code`, `check_verification_reply`, `post_winner_reply` |
-| Twitch | `twitch_status`, `twitch_get_channel`, `twitch_set_channel` |
+| Twitch | `twitch_status`, `twitch_get_channel`, `twitch_set_channel`, `twitch_authorize_url`, `twitch_finish_auth`, `twitch_raid`, `twitch_raid_cancel`, `twitch_raid_candidates` |
 | Meta | `quota_status`, `health_check` |
 
 Known API limitations (documented, not bugs): comments cannot be pinned via
@@ -85,10 +85,25 @@ One-time setup:
    Authorization codes expire in minutes -- paste promptly.
 
 This stores `twitch_client_id`, `twitch_client_secret` and
-`twitch_refresh_token` in the configured secret backend. The grant needs the
-`channel:manage:broadcast` scope — an app (client-credentials) token cannot
-modify a channel. Twitch rotates refresh tokens, and the rotated value is
+`twitch_refresh_token` in the configured secret backend. The grant requests
+every broadcaster scope in `twitch.SCOPE_LIST` (including `channel:manage:broadcast`
+and `channel:manage:raids`) except `channel:read:stream_key`, `user:read:email`
+and the whisper scopes, which are never requested (see `EXCLUDED_SCOPES`) — an
+app (client-credentials) token cannot modify a channel. `twitch_status` lists
+granted vs requested scopes; when `scopes.missing` is non-empty, re-approve once
+with `twitch_authorize_url` then `twitch_finish_auth`. Twitch rotates refresh tokens, and the rotated value is
 persisted automatically (except on the read-only `env` backend).
+
+### Raids
+
+`twitch_raid_candidates(logins)` reports which channels are live now (game,
+viewer count, title). `twitch_raid(to_login)` starts a raid; Twitch shows a ~90 s
+countdown and then sends it, and **ending the stream before then cancels it**.
+`twitch_raid_cancel()` cancels during the countdown. Twitch allows 10 raid
+requests per 10 minutes. Failures come back as `{ok: false, code, error, hint}`
+with `code` one of `invalid_login`, `not_found`, `self_raid`, `missing_scope`,
+`rate_limited`, `already_raiding`, `not_live`, `target_refuses`,
+`no_pending_raid`, `twitch_error`.
 
 ## Running a giveaway
 

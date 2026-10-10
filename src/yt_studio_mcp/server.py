@@ -28,8 +28,9 @@ def build_app() -> FastMCP:
             "Manage the authorized YouTube channel: videos, comments and "
             "moderation, playlists, live broadcasts, captions, analytics, and "
             "auditable comment-entry giveaways, and the Twitch channel title/"
-            "category that multistream plugins do NOT carry over. Every mutating "
-            "tool accepts dry_run=True to preview without writing."
+            "category that multistream plugins do NOT carry over, plus Twitch "
+            "raids. Every mutating tool accepts dry_run=True to preview without "
+            "writing."
         ),
     )
     for module in (
