@@ -7,6 +7,51 @@ from mcp.types import ToolAnnotations
 from ..client import get_yt, preview
 from ..validate import check_future_schedule, check_privacy
 
+LATENCIES = ("normal", "low", "ultraLow")
+# contentDetails fields liveBroadcasts.update accepts. The update REPLACES the part, so every
+# one is carried over from the readback. Not sent: boundStreamId / boundStreamLastUpdateTimeMs
+# (read-only), enableLowLatency (deprecated; it fights latencyPreference), embedHtml (read-only).
+_CD_WRITABLE = (
+    "monitorStream",
+    "enableEmbed",
+    "enableDvr",
+    "enableContentEncryption",
+    "startWithSlate",
+    "recordFromStart",
+    "enableClosedCaptions",
+    "closedCaptionsType",
+    "projection",
+    "enableAutoStart",
+    "enableAutoStop",
+    "latencyPreference",
+)
+_FIXED_LIFECYCLES = ("testing", "live", "complete", "revoked", "liveStarting", "testStarting")
+
+
+def content_details_with_latency(cd: dict, latency: str) -> tuple[dict, list[str]]:
+    """(contentDetails body for liveBroadcasts.update with only latencyPreference changed, notes).
+
+    ultraLow does not support closed captions (YouTube refuses the update otherwise), so captions
+    are switched off and that is noted."""
+    body = {k: cd[k] for k in _CD_WRITABLE if k in cd}
+    ms = cd.get("monitorStream")
+    if isinstance(ms, dict):
+        body["monitorStream"] = {
+            k: ms[k] for k in ("enableMonitorStream", "broadcastStreamDelayMs") if k in ms
+        }
+    body["latencyPreference"] = latency
+    notes = []
+    if latency == "ultraLow":
+        if body.get("closedCaptionsType") not in (None, "closedCaptionsDisabled") or body.get(
+            "enableClosedCaptions"
+        ):
+            notes.append("ultraLow does not support live captions: closed captions were turned off")
+        if "closedCaptionsType" in body or "enableClosedCaptions" in body:
+            body["closedCaptionsType"] = "closedCaptionsDisabled"
+            body["enableClosedCaptions"] = False
+        notes.append("ultraLow caps the live stream at 1080p (no 1440p/4K live)")
+    return body, notes
+
 
 def register(mcp) -> None:
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -42,9 +87,14 @@ def register(mcp) -> None:
         twitch: bool = True,
         twitch_title: str = "",
         twitch_game: str = "",
+        latency: str = "ultraLow",
         dry_run: bool = False,
     ) -> dict:
         """Schedule a live broadcast. start_time is RFC3339 (e.g. 2026-08-01T18:00:00Z).
+
+        latency (normal|low|ultraLow, default ultraLow) is YouTube's latencyPreference.
+        ultraLow keeps viewers a few seconds behind so the hosts can answer chat, but caps live
+        at 1080p and has no live captions; change it with set_broadcast_latency before go-live.
 
         Multistream plugins (Aitum, Restream) copy the VIDEO to Twitch but NOT the
         metadata, so by default this also sets the Twitch title/category. Twitch
@@ -60,13 +110,21 @@ def register(mcp) -> None:
             return {"error": err}
         if err := check_future_schedule(start_time):
             return {"error": err.replace("publish_at", "start_time")}
+        if latency not in LATENCIES:
+            return {"error": f"latency must be one of {', '.join(LATENCIES)}"}
         if dry_run:
             return preview(
                 "create_broadcast",
-                {"title": title, "start_time": start_time, "privacy": privacy,
-                 "listed_publicly_now": privacy == "public",
-                 "twitch": twitch, "twitch_title": twitch_title or title,
-                 "twitch_game": twitch_game},
+                {
+                    "title": title,
+                    "start_time": start_time,
+                    "privacy": privacy,
+                    "latency": latency,
+                    "listed_publicly_now": privacy == "public",
+                    "twitch": twitch,
+                    "twitch_title": twitch_title or title,
+                    "twitch_game": twitch_game,
+                },
             )
         yt = get_yt()
         res = yt.call(
@@ -79,12 +137,21 @@ def register(mcp) -> None:
                         "scheduledStartTime": start_time,
                     },
                     "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False},
-                    "contentDetails": {"enableAutoStart": False, "enableAutoStop": True},
+                    "contentDetails": {
+                        "enableAutoStart": False,
+                        "enableAutoStop": True,
+                        "latencyPreference": latency,
+                    },
                 },
             ),
             op="insert",
         )
-        out = {"created": res["id"], "title": title, "scheduled_start": start_time}
+        out = {
+            "created": res["id"],
+            "title": title,
+            "scheduled_start": start_time,
+            "latency": latency,
+        }
         if twitch:
             # The YouTube broadcast is already created; a Twitch failure must be
             # reported, never raised, or a working broadcast looks like a failure.
@@ -93,11 +160,79 @@ def register(mcp) -> None:
             try:
                 out["twitch"] = set_channel(twitch_title or title, twitch_game or None)
             except TwitchNotConfigured as exc:
-                out["twitch"] = {"configured": False, "missing": exc.missing,
-                                 "hint": str(exc)}
+                out["twitch"] = {"configured": False, "missing": exc.missing, "hint": str(exc)}
             except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
                 out["twitch"] = {"error": str(exc)}
         return out
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
+    def set_broadcast_latency(
+        broadcast_id: str, latency: str = "ultraLow", dry_run: bool = False
+    ) -> dict:
+        """Set a scheduled broadcast's latencyPreference (normal|low|ultraLow); reads it back.
+
+        Only before it goes live (YouTube fixes it at go-live). Every other contentDetails field
+        (auto start/stop, DVR, monitor stream, embed ...) is kept. ultraLow turns live captions off
+        and caps the live stream at 1080p. Costs 1 unit to read + 50 to update (0 when already set).
+        """
+        if latency not in LATENCIES:
+            return {"error": f"latency must be one of {', '.join(LATENCIES)}"}
+        yt = get_yt()
+
+        def read():
+            r = yt.call(
+                yt.data.liveBroadcasts().list(part="id,status,contentDetails", id=broadcast_id),
+                op="list",
+            )
+            return (r.get("items") or [None])[0]
+
+        b = read()
+        if not b:
+            return {"error": f"no broadcast {broadcast_id} on this channel"}
+        life = (b.get("status") or {}).get("lifeCycleStatus")
+        cd = b.get("contentDetails") or {}
+        before = cd.get("latencyPreference")
+        if before == latency:
+            return {
+                "broadcast": broadcast_id,
+                "changed": False,
+                "latency_before": before,
+                "latency_after": before,
+                "lifecycle": life,
+                "notes": [],
+            }
+        if life in _FIXED_LIFECYCLES:
+            return {
+                "error": f"broadcast {broadcast_id} is {life}: "
+                "its latency can only change before it goes live"
+            }
+        body, notes = content_details_with_latency(cd, latency)
+        if dry_run:
+            return preview(
+                "set_broadcast_latency",
+                {
+                    "broadcast_id": broadcast_id,
+                    "from": before,
+                    "to": latency,
+                    "contentDetails": body,
+                    "notes": notes,
+                },
+            )
+        yt.call(
+            yt.data.liveBroadcasts().update(
+                part="contentDetails", body={"id": broadcast_id, "contentDetails": body}
+            ),
+            op="update",
+        )
+        after = ((read() or {}).get("contentDetails") or {}).get("latencyPreference")
+        return {
+            "broadcast": broadcast_id,
+            "changed": after == latency,
+            "latency_before": before,
+            "latency_after": after,
+            "lifecycle": life,
+            "notes": notes,
+        }
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     def list_streams(limit: int = 10) -> list[dict]:
@@ -121,9 +256,7 @@ def register(mcp) -> None:
     def bind_broadcast(broadcast_id: str, stream_id: str, dry_run: bool = False) -> dict:
         """Bind a broadcast to a stream key."""
         if dry_run:
-            return preview(
-                "bind_broadcast", {"broadcast_id": broadcast_id, "stream_id": stream_id}
-            )
+            return preview("bind_broadcast", {"broadcast_id": broadcast_id, "stream_id": stream_id})
         yt = get_yt()
         yt.call(
             yt.data.liveBroadcasts().bind(id=broadcast_id, part="id", streamId=stream_id),

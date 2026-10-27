@@ -14,7 +14,8 @@ EXPECTED = {
     "list_comments", "post_video_question", "reply_to_comment", "moderate_comment",
     "mark_spam", "delete_comment", "list_held_comments",
     # live
-    "list_broadcasts", "create_broadcast", "list_streams", "bind_broadcast",
+    "list_broadcasts", "create_broadcast", "set_broadcast_latency", "list_streams",
+    "bind_broadcast",
     "live_chat_messages", "post_chat_message", "delete_chat_message", "ban_chat_user",
     # captions
     "list_captions", "upload_caption", "download_caption",
