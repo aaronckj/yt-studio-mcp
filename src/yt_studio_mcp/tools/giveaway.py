@@ -140,8 +140,15 @@ def canonical_hash(entries: list[dict]) -> str:
 
 
 META_FIELDS = (
-    "algo", "window", "max_entries_per_user", "excluded", "videos_scanned",
-    "comments_seen", "complete", "truncated_videos", "uploads_truncated",
+    "algo",
+    "window",
+    "max_entries_per_user",
+    "excluded",
+    "videos_scanned",
+    "comments_seen",
+    "complete",
+    "truncated_videos",
+    "uploads_truncated",
     "comments_disabled_videos",
 )
 
@@ -161,8 +168,7 @@ def _draw_v1(entries: list[dict], seed: str) -> list[dict]:
 
 
 def draw_rank(seed: str, entry_hash: str, e: dict) -> str:
-    material = "|".join(("v2", seed, entry_hash, e["channel_id"], e["video_id"],
-                         e["comment_id"]))
+    material = "|".join(("v2", seed, entry_hash, e["channel_id"], e["video_id"], e["comment_id"]))
     return hashlib.sha256(material.encode()).hexdigest()
 
 
@@ -208,13 +214,16 @@ def _write_atomic(path: Path, text: str) -> None:
 
 def collect_raw(yt, comment_limit_per_video: int = COMMENTS_PER_VIDEO_DEFAULT) -> dict:
     """Fetch every upload's top-level comments, recording anything cut off."""
-    me = yt.call(yt.data.channels().list(part="id,contentDetails", mine=True), op="list")[
-        "items"
-    ][0]
+    me = yt.call(yt.data.channels().list(part="id,contentDetails", mine=True), op="list")["items"][
+        0
+    ]
     own_id = me["id"]
     uploads = me["contentDetails"]["relatedPlaylists"]["uploads"]
     video_items, uploads_truncated = yt.paginate_more(
-        yt.data.playlistItems(), "list", limit=UPLOADS_LIMIT, part="snippet",
+        yt.data.playlistItems(),
+        "list",
+        limit=UPLOADS_LIMIT,
+        part="snippet",
         playlistId=uploads,
     )
     video_ids = [i["snippet"]["resourceId"]["videoId"] for i in video_items]
@@ -254,13 +263,21 @@ def collect_raw(yt, comment_limit_per_video: int = COMMENTS_PER_VIDEO_DEFAULT) -
                     "published": top["publishedAt"],
                 }
             )
-    return {"own_id": own_id, "video_ids": video_ids, "raw": raw,
-            "truncated_videos": truncated, "uploads_truncated": uploads_truncated,
-            "comments_disabled_videos": disabled}
+    return {
+        "own_id": own_id,
+        "video_ids": video_ids,
+        "raw": raw,
+        "truncated_videos": truncated,
+        "uploads_truncated": uploads_truncated,
+        "comments_disabled_videos": disabled,
+    }
 
 
 def freeze_snapshot(
-    collected: dict, start: str, end: str, max_entries_per_user: int,
+    collected: dict,
+    start: str,
+    end: str,
+    max_entries_per_user: int,
     exclude_channel_ids: list[str],
 ) -> dict:
     """Derive entries and write the snapshot file. Shared by the tool and CLI."""
@@ -371,8 +388,9 @@ def load_verified_audit(audit_path: Path) -> dict:
     algo = audit.get("draw_algo", audit.get("algo", "v1"))
     expected = deterministic_draw(snap["entries"], audit["n"], audit["seed"], algo=algo)
     if expected != audit.get("winners"):
-        raise ValueError("audit winners do not match a re-draw from the snapshot — "
-                         "the audit file was modified")
+        raise ValueError(
+            "audit winners do not match a re-draw from the snapshot — the audit file was modified"
+        )
     return audit
 
 
@@ -392,8 +410,10 @@ def draw_winners_record(
     redraw_reason: str = "",
     allow_incomplete: bool = False,
 ) -> dict:
-    """THE draw (used by the MCP tool draw_winners and the `yt-studio-mcp draw` CLI, so both run the same code): deterministic
-    winners from a frozen snapshot and a public seed, the tamper-evident draw log, the audit record."""
+    """THE draw. The MCP tool draw_winners and the `yt-studio-mcp draw` CLI
+    both call it, so both run the same code: deterministic winners from a
+    frozen snapshot and a public seed, the tamper-evident draw log, the audit
+    record."""
 
     if not seed:
         return {"error": "provide a seed (announce it publicly for verifiability)"}
@@ -415,8 +435,9 @@ def draw_winners_record(
         }
     entries = snap["entries"]
     digest = snap["entry_hash"]
-    other_seeds = sorted({r["seed_sha256"] for r in prior} - {
-        hashlib.sha256(seed.encode()).hexdigest()})
+    other_seeds = sorted(
+        {r["seed_sha256"] for r in prior} - {hashlib.sha256(seed.encode()).hexdigest()}
+    )
     if other_seeds and not redraw_reason.strip():
         return {
             "error": f"this snapshot was already drawn with {len(other_seeds)} other "
@@ -443,22 +464,27 @@ def draw_winners_record(
         if existing.get("winners") == winners and existing.get("seed") == seed:
             audit, reused = existing, True
         else:
-            return {"error": f"{audit_path.name} exists with different content; "
-                    "refusing to overwrite an audit record"}
+            return {
+                "error": f"{audit_path.name} exists with different content; "
+                "refusing to overwrite an audit record"
+            }
     else:
         _write_exclusive(audit_path, json.dumps(audit, indent=2))
-    _append_draw_log(path, {
-        "at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "algo": algo,
-        "seed": seed,
-        "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
-        "n": n,
-        "entry_hash": digest,
-        "winners": [w["channel_id"] for w in winners],
-        "audit": audit_path.name,
-        "rerun_of_existing": reused,
-        "redraw_reason": redraw_reason.strip() or None,
-    })
+    _append_draw_log(
+        path,
+        {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "algo": algo,
+            "seed": seed,
+            "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
+            "n": n,
+            "entry_hash": digest,
+            "winners": [w["channel_id"] for w in winners],
+            "audit": audit_path.name,
+            "rerun_of_existing": reused,
+            "redraw_reason": redraw_reason.strip() or None,
+        },
+    )
     return {
         "winners": winners,
         "audit_path": str(audit_path),
@@ -468,7 +494,6 @@ def draw_winners_record(
         "reused_existing_audit": reused,
         "reproduce": f"draw_winners(snapshot_path, n={n}, seed={seed!r}, algo={algo!r})",
     }
-
 
 
 def register(mcp) -> None:
@@ -524,8 +549,14 @@ def register(mcp) -> None:
         DIFFERENT seed is refused unless redraw_reason explains why (it is
         recorded). Re-running the same draw returns the existing audit record
         unchanged, so issued verification codes are never wiped."""
-        return draw_winners_record(snapshot_path, n=n, seed=seed, algo=algo, redraw_reason=redraw_reason,
-                                   allow_incomplete=allow_incomplete)
+        return draw_winners_record(
+            snapshot_path,
+            n=n,
+            seed=seed,
+            algo=algo,
+            redraw_reason=redraw_reason,
+            allow_incomplete=allow_incomplete,
+        )
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def make_verification_code(
@@ -543,8 +574,11 @@ def register(mcp) -> None:
             return {"error": f"{winner_channel_id} is not a winner in this audit record"}
         codes = audit.setdefault("verification_codes", {})
         if winner_channel_id in codes and not rotate:
-            return {"channel_id": winner_channel_id, "code": codes[winner_channel_id],
-                    "existing": True}
+            return {
+                "channel_id": winner_channel_id,
+                "code": codes[winner_channel_id],
+                "existing": True,
+            }
         code = pysecrets.token_hex(4)
         codes[winner_channel_id] = code
         _write_atomic(path, json.dumps(audit, indent=2))
@@ -589,9 +623,7 @@ def register(mcp) -> None:
         prefixed with an apostrophe."""
         try:
             path = resolve_giveaway_path(snapshot_path)
-            out_path = (
-                resolve_giveaway_path(csv_path) if csv_path else path.with_suffix(".csv")
-            )
+            out_path = resolve_giveaway_path(csv_path) if csv_path else path.with_suffix(".csv")
             snap = load_snapshot(path)
         except (ValueError, OSError, KeyError) as exc:
             return {"error": str(exc)}
@@ -601,9 +633,7 @@ def register(mcp) -> None:
         with out_path.open("w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fields)
             writer.writeheader()
-            writer.writerows(
-                {k: csv_safe(e.get(k, "")) for k in fields} for e in snap["entries"]
-            )
+            writer.writerows({k: csv_safe(e.get(k, "")) for k in fields} for e in snap["entries"])
         return {
             "csv_path": str(out_path),
             "entries": len(snap["entries"]),
@@ -632,7 +662,7 @@ def register(mcp) -> None:
             lines.append(f"Claims: {contact}")
         lines += [
             "",
-            f"Drawn from {audit['n']}-winner random draw, seed \"{audit['seed']}\", "
+            f'Drawn from {audit["n"]}-winner random draw, seed "{audit["seed"]}", '
             f"entry hash {audit['entry_hash'][:12]}… (independently verifiable).",
             "We will NEVER ask for payment or card details.",
         ]

@@ -24,8 +24,13 @@ START, END = "2026-07-24T00:00:00Z", "2026-08-31T23:59:59Z"
 
 def _entries(k=30):
     return [
-        {"channel_id": f"ch{i % 7}", "video_id": f"v{i}", "comment_id": f"c{i}",
-         "author": f"user{i % 7}", "published": "2026-08-01T00:00:00Z"}
+        {
+            "channel_id": f"ch{i % 7}",
+            "video_id": f"v{i}",
+            "comment_id": f"c{i}",
+            "author": f"user{i % 7}",
+            "published": "2026-08-01T00:00:00Z",
+        }
         for i in range(k)
     ]
 
@@ -38,22 +43,34 @@ def gdir(tmp_path, monkeypatch):
 
 def _snapshot(complete=True, truncated=None):
     raw = [
-        {"author_channel_id": e["channel_id"], "author": e["author"],
-         "video_id": e["video_id"], "comment_id": e["comment_id"],
-         "published": e["published"]}
+        {
+            "author_channel_id": e["channel_id"],
+            "author": e["author"],
+            "video_id": e["video_id"],
+            "comment_id": e["comment_id"],
+            "published": e["published"],
+        }
         for e in _entries()
     ]
-    collected = {"own_id": "OWN", "video_ids": [f"v{i}" for i in range(30)], "raw": raw,
-                 "truncated_videos": truncated or [], "uploads_truncated": not complete}
+    collected = {
+        "own_id": "OWN",
+        "video_ids": [f"v{i}" for i in range(30)],
+        "raw": raw,
+        "truncated_videos": truncated or [],
+        "uploads_truncated": not complete,
+    }
     return freeze_snapshot(collected, START, END, 5, [])["snapshot_path"]
 
 
 def test_v2_draw_is_reproducible_without_python_random():
     entries = _entries()
     digest = canonical_hash(entries)
-    ranked = sorted(entries, key=lambda e: hashlib.sha256(
-        f"v2|seed-1|{digest}|{e['channel_id']}|{e['video_id']}|{e['comment_id']}".encode()
-    ).hexdigest())
+    ranked = sorted(
+        entries,
+        key=lambda e: hashlib.sha256(
+            f"v2|seed-1|{digest}|{e['channel_id']}|{e['video_id']}|{e['comment_id']}".encode()
+        ).hexdigest(),
+    )
     expected, seen = [], set()
     for e in ranked:
         if e["channel_id"] not in seen:
@@ -65,8 +82,15 @@ def test_v2_draw_is_reproducible_without_python_random():
 def test_v2_binds_seed_to_entry_set():
     """The same seed over a different entry set gives an unrelated order."""
     a = _entries()
-    b = _entries() + [{"channel_id": "chX", "video_id": "vX", "comment_id": "cX",
-                       "author": "x", "published": "2026-08-01T00:00:00Z"}]
+    b = _entries() + [
+        {
+            "channel_id": "chX",
+            "video_id": "vX",
+            "comment_id": "cX",
+            "author": "x",
+            "published": "2026-08-01T00:00:00Z",
+        }
+    ]
     ra = [e["comment_id"] for e in giveaway._draw_v2(a, "s")]
     rb = [e["comment_id"] for e in giveaway._draw_v2(b, "s") if e["comment_id"] != "cX"]
     assert ra != rb
@@ -76,10 +100,18 @@ def test_naive_window_rejected_and_ties_are_order_independent():
     with pytest.raises(ValueError):
         build_entries([], "2026-07-24T00:00:00", END, 5, [])
     cs = [
-        {"author_channel_id": "a", "video_id": "v2", "comment_id": "c2",
-         "published": "2026-08-01T00:00:00Z"},
-        {"author_channel_id": "a", "video_id": "v1", "comment_id": "c1",
-         "published": "2026-08-01T00:00:00Z"},
+        {
+            "author_channel_id": "a",
+            "video_id": "v2",
+            "comment_id": "c2",
+            "published": "2026-08-01T00:00:00Z",
+        },
+        {
+            "author_channel_id": "a",
+            "video_id": "v1",
+            "comment_id": "c1",
+            "published": "2026-08-01T00:00:00Z",
+        },
     ]
     one = build_entries(cs, START, END, 1, [])
     two = build_entries(list(reversed(cs)), START, END, 1, [])
@@ -130,7 +162,10 @@ def test_rerun_same_draw_keeps_verification_codes(gdir):
     again = t["draw_winners"](path, n=2, seed="s1")
     assert again["reused_existing_audit"] is True
     assert t["make_verification_code"](again["audit_path"], w) == {
-        "channel_id": w, "code": code, "existing": True}
+        "channel_id": w,
+        "code": code,
+        "existing": True,
+    }
 
 
 def test_edited_audit_winners_are_detected(gdir):
@@ -163,7 +198,7 @@ def test_seed_never_reaches_a_filename(gdir):
 
 
 def test_csv_formula_injection_neutralised():
-    assert csv_safe("=HYPERLINK(\"x\")") == "'=HYPERLINK(\"x\")"
+    assert csv_safe('=HYPERLINK("x")') == '\'=HYPERLINK("x")'
     assert csv_safe("@SUM(1)").startswith("'")
     assert csv_safe("normal name") == "normal name"
 
@@ -186,8 +221,14 @@ class _Data:
     def channels(self):
         class C:
             def list(self, **kw):
-                return Req({"items": [{"id": "OWN", "contentDetails": {
-                    "relatedPlaylists": {"uploads": "UU"}}}]})
+                return Req(
+                    {
+                        "items": [
+                            {"id": "OWN", "contentDetails": {"relatedPlaylists": {"uploads": "UU"}}}
+                        ]
+                    }
+                )
+
         return C()
 
     def playlistItems(self):  # noqa: N802
@@ -200,17 +241,29 @@ class _Data:
             class R:
                 status = 403
                 reason = "x"
+
             body = json.dumps({"error": {"errors": [{"reason": "commentsDisabled"}]}})
 
             class Bad:
                 def list(self, **kw):
                     return Req(error=HttpError(R(), body.encode()))
+
             return Bad()
 
         def thread(i):
-            return {"snippet": {"topLevelComment": {"id": f"c{i}", "snippet": {
-                "authorChannelId": {"value": f"u{i}"}, "authorDisplayName": f"u{i}",
-                "publishedAt": "2026-08-01T00:00:00Z"}}}}
+            return {
+                "snippet": {
+                    "topLevelComment": {
+                        "id": f"c{i}",
+                        "snippet": {
+                            "authorChannelId": {"value": f"u{i}"},
+                            "authorDisplayName": f"u{i}",
+                            "publishedAt": "2026-08-01T00:00:00Z",
+                        },
+                    }
+                }
+            }
+
         return _Pages([{"items": [thread(i) for i in range(self.n)], "nextPageToken": "more"}])
 
 
@@ -230,12 +283,13 @@ def test_comments_disabled_video_does_not_abort_collection():
 
 
 def test_draw_cli_runs_the_same_draw_as_the_tool(gdir, monkeypatch, capsys):
-    """`yt-studio-mcp draw` (Cipher Studio's apps run the draw through it) calls draw_winners_record, the function behind
-    the MCP tool: same winners for the same snapshot + seed, the seed read from stdin, one draw log entry per draw."""
+    """`yt-studio-mcp draw` calls draw_winners_record, the function behind the
+    MCP tool: same winners for the same snapshot + seed, seed from stdin."""
     import io
     import json as _json
 
     from yt_studio_mcp.draw_cli import main as draw_main
+
     t = tools_of(giveaway)
     path = _snapshot()
     via_tool = t["draw_winners"](path, n=2, seed="public-seed-1")
@@ -244,7 +298,7 @@ def test_draw_cli_runs_the_same_draw_as_the_tool(gdir, monkeypatch, capsys):
     via_cli = _json.loads(capsys.readouterr().out)
     assert via_cli["winners"] == via_tool["winners"] and via_cli["reused_existing_audit"] is True
     monkeypatch.setattr("sys.stdin", io.StringIO("another-seed\n"))
-    assert draw_main(["--snapshot", path, "--n", "2"]) == 2               # a second seed needs a recorded reason
+    assert draw_main(["--snapshot", path, "--n", "2"]) == 2  # a second seed needs a recorded reason
     assert "already drawn" in _json.loads(capsys.readouterr().out)["error"]
     monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
-    assert draw_main(["--snapshot", path, "--n", "2"]) == 2               # no seed, no draw
+    assert draw_main(["--snapshot", path, "--n", "2"]) == 2  # no seed, no draw
