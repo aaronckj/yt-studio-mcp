@@ -227,3 +227,24 @@ def test_comments_disabled_video_does_not_abort_collection():
     data.disabled = True
     out = collect_raw(YT(data_service=data))
     assert out["comments_disabled_videos"] == ["v1"] and out["truncated_videos"] == []
+
+
+def test_draw_cli_runs_the_same_draw_as_the_tool(gdir, monkeypatch, capsys):
+    """`yt-studio-mcp draw` (Cipher Studio's apps run the draw through it) calls draw_winners_record, the function behind
+    the MCP tool: same winners for the same snapshot + seed, the seed read from stdin, one draw log entry per draw."""
+    import io
+    import json as _json
+
+    from yt_studio_mcp.draw_cli import main as draw_main
+    t = tools_of(giveaway)
+    path = _snapshot()
+    via_tool = t["draw_winners"](path, n=2, seed="public-seed-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO("public-seed-1\n"))
+    assert draw_main(["--snapshot", path, "--n", "2"]) == 0
+    via_cli = _json.loads(capsys.readouterr().out)
+    assert via_cli["winners"] == via_tool["winners"] and via_cli["reused_existing_audit"] is True
+    monkeypatch.setattr("sys.stdin", io.StringIO("another-seed\n"))
+    assert draw_main(["--snapshot", path, "--n", "2"]) == 2               # a second seed needs a recorded reason
+    assert "already drawn" in _json.loads(capsys.readouterr().out)["error"]
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert draw_main(["--snapshot", path, "--n", "2"]) == 2               # no seed, no draw
