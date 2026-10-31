@@ -17,6 +17,11 @@ def main() -> None:
 
         raise SystemExit(collect_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "draw":
+        from .draw_cli import main as draw_main
+
+        raise SystemExit(draw_main(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "watch":
         from .watch_cli import main as watch_main
 

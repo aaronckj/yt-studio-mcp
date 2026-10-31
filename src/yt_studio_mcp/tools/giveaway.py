@@ -384,6 +384,93 @@ def csv_safe(value: str) -> str:
     return value
 
 
+def draw_winners_record(
+    snapshot_path: str,
+    n: int = 5,
+    seed: str = "",
+    algo: str = ALGO_VERSION,
+    redraw_reason: str = "",
+    allow_incomplete: bool = False,
+) -> dict:
+    """THE draw (used by the MCP tool draw_winners and the `yt-studio-mcp draw` CLI, so both run the same code): deterministic
+    winners from a frozen snapshot and a public seed, the tamper-evident draw log, the audit record."""
+
+    if not seed:
+        return {"error": "provide a seed (announce it publicly for verifiability)"}
+    if algo not in DRAW_ALGOS:
+        return {"error": f"algo must be one of {DRAW_ALGOS}"}
+    if n < 1:
+        return {"error": "n must be >= 1"}
+    try:
+        path = resolve_giveaway_path(snapshot_path)
+        snap = load_snapshot(path)
+        prior = read_draw_log(path)
+    except (ValueError, OSError, KeyError) as exc:
+        return {"error": str(exc)}
+    if snap.get("complete") is False and not allow_incomplete:
+        return {
+            "error": "snapshot is INCOMPLETE (collection hit a page limit on "
+            f"{len(snap.get('truncated_videos', []))} video(s)); re-collect with a "
+            "higher limit, or pass allow_incomplete=True to draw anyway",
+        }
+    entries = snap["entries"]
+    digest = snap["entry_hash"]
+    other_seeds = sorted({r["seed_sha256"] for r in prior} - {
+        hashlib.sha256(seed.encode()).hexdigest()})
+    if other_seeds and not redraw_reason.strip():
+        return {
+            "error": f"this snapshot was already drawn with {len(other_seeds)} other "
+            "seed(s). A redraw must be justified: pass redraw_reason (it is "
+            "recorded in the draw log).",
+            "prior_draws": prior,
+        }
+    winners = deterministic_draw(entries, n, seed, algo=algo)
+    audit_path = path.with_name(f"{path.stem}-draw-{algo}-{_seed_tag(seed)}-n{n}.json")
+    audit = {
+        "algo": algo,  # kept for v1-era readers
+        "draw_algo": algo,
+        "snapshot": path.name,
+        "entry_hash": digest,
+        "seed": seed,
+        "n": n,
+        "winners": winners,
+        "participants": len({e["channel_id"] for e in entries}),
+        "verification_codes": {},
+    }
+    reused = False
+    if audit_path.exists():
+        existing = json.loads(audit_path.read_text())
+        if existing.get("winners") == winners and existing.get("seed") == seed:
+            audit, reused = existing, True
+        else:
+            return {"error": f"{audit_path.name} exists with different content; "
+                    "refusing to overwrite an audit record"}
+    else:
+        _write_exclusive(audit_path, json.dumps(audit, indent=2))
+    _append_draw_log(path, {
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "algo": algo,
+        "seed": seed,
+        "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
+        "n": n,
+        "entry_hash": digest,
+        "winners": [w["channel_id"] for w in winners],
+        "audit": audit_path.name,
+        "rerun_of_existing": reused,
+        "redraw_reason": redraw_reason.strip() or None,
+    })
+    return {
+        "winners": winners,
+        "audit_path": str(audit_path),
+        "entry_hash": digest,
+        "algo": algo,
+        "prior_draws": len(prior),
+        "reused_existing_audit": reused,
+        "reproduce": f"draw_winners(snapshot_path, n={n}, seed={seed!r}, algo={algo!r})",
+    }
+
+
+
 def register(mcp) -> None:
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def collect_entries(
@@ -437,79 +524,8 @@ def register(mcp) -> None:
         DIFFERENT seed is refused unless redraw_reason explains why (it is
         recorded). Re-running the same draw returns the existing audit record
         unchanged, so issued verification codes are never wiped."""
-        if not seed:
-            return {"error": "provide a seed (announce it publicly for verifiability)"}
-        if algo not in DRAW_ALGOS:
-            return {"error": f"algo must be one of {DRAW_ALGOS}"}
-        if n < 1:
-            return {"error": "n must be >= 1"}
-        try:
-            path = resolve_giveaway_path(snapshot_path)
-            snap = load_snapshot(path)
-            prior = read_draw_log(path)
-        except (ValueError, OSError, KeyError) as exc:
-            return {"error": str(exc)}
-        if snap.get("complete") is False and not allow_incomplete:
-            return {
-                "error": "snapshot is INCOMPLETE (collection hit a page limit on "
-                f"{len(snap.get('truncated_videos', []))} video(s)); re-collect with a "
-                "higher limit, or pass allow_incomplete=True to draw anyway",
-            }
-        entries = snap["entries"]
-        digest = snap["entry_hash"]
-        other_seeds = sorted({r["seed_sha256"] for r in prior} - {
-            hashlib.sha256(seed.encode()).hexdigest()})
-        if other_seeds and not redraw_reason.strip():
-            return {
-                "error": f"this snapshot was already drawn with {len(other_seeds)} other "
-                "seed(s). A redraw must be justified: pass redraw_reason (it is "
-                "recorded in the draw log).",
-                "prior_draws": prior,
-            }
-        winners = deterministic_draw(entries, n, seed, algo=algo)
-        audit_path = path.with_name(f"{path.stem}-draw-{algo}-{_seed_tag(seed)}-n{n}.json")
-        audit = {
-            "algo": algo,  # kept for v1-era readers
-            "draw_algo": algo,
-            "snapshot": path.name,
-            "entry_hash": digest,
-            "seed": seed,
-            "n": n,
-            "winners": winners,
-            "participants": len({e["channel_id"] for e in entries}),
-            "verification_codes": {},
-        }
-        reused = False
-        if audit_path.exists():
-            existing = json.loads(audit_path.read_text())
-            if existing.get("winners") == winners and existing.get("seed") == seed:
-                audit, reused = existing, True
-            else:
-                return {"error": f"{audit_path.name} exists with different content; "
-                        "refusing to overwrite an audit record"}
-        else:
-            _write_exclusive(audit_path, json.dumps(audit, indent=2))
-        _append_draw_log(path, {
-            "at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "algo": algo,
-            "seed": seed,
-            "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
-            "n": n,
-            "entry_hash": digest,
-            "winners": [w["channel_id"] for w in winners],
-            "audit": audit_path.name,
-            "rerun_of_existing": reused,
-            "redraw_reason": redraw_reason.strip() or None,
-        })
-        return {
-            "winners": winners,
-            "audit_path": str(audit_path),
-            "entry_hash": digest,
-            "algo": algo,
-            "prior_draws": len(prior),
-            "reused_existing_audit": reused,
-            "reproduce": f"draw_winners(snapshot_path, n={n}, seed={seed!r}, algo={algo!r})",
-        }
+        return draw_winners_record(snapshot_path, n=n, seed=seed, algo=algo, redraw_reason=redraw_reason,
+                                   allow_incomplete=allow_incomplete)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False))
     def make_verification_code(
