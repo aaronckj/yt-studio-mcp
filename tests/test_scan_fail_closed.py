@@ -99,14 +99,16 @@ def test_concurrent_scan_is_refused(cfg, monkeypatch):
 
 
 def test_watermark_writes_use_unique_temp_files(cfg, monkeypatch):
+    import os
+
     names = []
-    real = banned_words.os.replace
+    real = os.rename  # safe_io.atomic_write renames its random temp inside the dir fd
 
-    def spy(src, dst):
+    def spy(src, dst, **kw):
         names.append(str(src))
-        real(src, dst)
+        real(src, dst, **kw)
 
-    monkeypatch.setattr(banned_words.os, "replace", spy)
+    monkeypatch.setattr(os, "rename", spy)
     banned_words.write_watermark(TS_NEW)
     banned_words.write_watermark(TS_NEW)
     assert len(set(names)) == 2

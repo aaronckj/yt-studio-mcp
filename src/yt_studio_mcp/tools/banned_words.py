@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import re
-import secrets as pysecrets
 from contextlib import contextmanager
 from pathlib import Path
 
 from mcp.types import ToolAnnotations
 
+from .._vendor.splendid_safe import safe_io
 from ..client import get_yt, preview
 from ..paths import config_dir, scan_state_path, wordlist_path
 from ..validate import parse_rfc3339
@@ -100,17 +99,8 @@ def _atomic_write(path: Path, text: str) -> None:
     """Unique temp name + rename: concurrent writers never share a temp file
     and a reader never sees a half-written file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{pysecrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+    p = path.absolute()
+    safe_io.atomic_write(str(p.parent), p.name, text, mode=0o600)
 
 
 def _save_words(words: list[str]) -> None:

@@ -41,6 +41,8 @@ packages = ["src/yt_studio_mcp"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# vendored byte-for-byte from aaron/splendid-safe (pinned by VENDOR.sha256): not linted to this repo's style
+extend-exclude = ["src/yt_studio_mcp/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

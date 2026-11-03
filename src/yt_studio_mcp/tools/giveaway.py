@@ -46,6 +46,7 @@ from random import Random
 
 from mcp.types import ToolAnnotations
 
+from .._vendor.splendid_safe import safe_io
 from ..client import ApiError, get_yt, preview
 from ..paths import giveaway_dir
 from ..validate import parse_rfc3339
@@ -199,11 +200,10 @@ def _write_exclusive(path: Path, text: str) -> None:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(f".{path.name}.{pysecrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    """splendid-safe atomic replace: random O_EXCL temp in the same directory,
+    fsynced, renamed; never written through a link."""
+    p = path.absolute()
+    safe_io.atomic_write(str(p.parent), p.name, text, mode=0o600)
 
 
 def collect_raw(yt, comment_limit_per_video: int = COMMENTS_PER_VIDEO_DEFAULT) -> dict:
