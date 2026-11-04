@@ -176,6 +176,11 @@ def register(mcp) -> None:
                 "tags": v["snippet"].get("tags", []),
                 "category_id": v["snippet"].get("categoryId"),
                 "duration": v.get("contentDetails", {}).get("duration"),
+                # the made-for-kids flag: a re-upload must copy it (update_video cannot
+                # set it). selfDeclared = what the channel set, madeForKids = effective
+                "self_declared_made_for_kids": v.get("status", {}).get("selfDeclaredMadeForKids"),
+                "made_for_kids": v.get("status", {}).get("madeForKids"),
+                "upload_status": v.get("status", {}).get("uploadStatus"),
             }
         )
         return out

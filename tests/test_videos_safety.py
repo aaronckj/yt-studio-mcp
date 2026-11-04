@@ -108,3 +108,14 @@ def test_thumbnail_validated_before_quota(env, tmp_path):
     ok.write_bytes(b"\xff\xd8")
     assert t["set_thumbnail"]("v1", str(ok), dry_run=True)["preview"]
     assert client._yt.quota.spent == 0
+
+
+def test_get_video_returns_the_made_for_kids_flag(env):
+    """A clean re-upload copies the flag; get_video used to drop it (Cipher stream 27, 2026-11-04)."""
+    v = video("v1", privacy="public")
+    v["status"].update(selfDeclaredMadeForKids=False, madeForKids=False, uploadStatus="processed")
+    data, t = env(v1=v)
+    out = t["get_video"]("v1")
+    assert out["self_declared_made_for_kids"] is False and out["made_for_kids"] is False
+    assert out["upload_status"] == "processed"
+    assert data.rec.writes() == []
